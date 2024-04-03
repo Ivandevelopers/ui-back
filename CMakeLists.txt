@@ -6,9 +6,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 project(main)
 
 add_executable(autopilot_control
-    main.cpp
-    autopilot_params.cpp
-    autopilot_mission.cpp
+    src/main.cpp
+    src/autopilot_params.cpp
+    src/autopilot_mission.cpp
 )
 
 find_package(MAVSDK REQUIRED)
