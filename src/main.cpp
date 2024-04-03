@@ -400,31 +400,31 @@ int main(int argc, char **argv) {
     packet.data[PACKET_SIZE - 2] = (char)(packet.crc16 & 0xFF);
     packet.data[PACKET_SIZE - 1] = (char)((packet.crc16 >> 8) & 0xFF);
 
-//     switch (flag_read_waypoint) {
-//     case 1: {
-//       auto waypoints = mission_raw->download_mission();
-//       std::cout << "Downloading mission...";
-//       auto result_download = waypoints.first;
+    switch (flag_read_waypoint) {
+    case 1: {
+      auto waypoints = mission_raw->download_mission();
+      std::cout << "Downloading mission...";
+      auto result_download = waypoints.first;
 
-//       if (result_download != MissionRaw::Result::Success) {
-//         std::cout << "Mission does not download."
-//                   << " " << result_download << std::endl;
-//       }
+      if (result_download != MissionRaw::Result::Success) {
+        std::cout << "Mission does not download."
+                  << " " << result_download << std::endl;
+      }
 
-//       std::this_thread::sleep_for(std::chrono::seconds(10));
+      std::this_thread::sleep_for(std::chrono::seconds(10));
 
-// #if defined(DEBUG)
-//       for (auto wp : waypoints.second) {
-//         std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
-//       }
-// #endif
+#if defined(DEBUG)
+      for (auto wp : waypoints.second) {
+        std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
+      }
+#endif
 
-//       readWaypoints(waypoints.second, "mission.plan");
-//       break;
-//     }
-//     default:
-//       break;
-//     }
+      readWaypoints(waypoints.second, "mission.plan");
+      break;
+    }
+    default:
+      break;
+    }
 
     switch (flag_write_waypoint) {
     case 1: {
