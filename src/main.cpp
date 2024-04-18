@@ -8,6 +8,8 @@
 
 #include <mavsdk/plugins/mission/mission.h>
 
+#include <mavsdk/plugins/mavlink_passthrough/mavlink_passthrough.h>
+
 #include <mavsdk/mavsdk.h>
 
 #include <arpa/inet.h>
@@ -26,7 +28,7 @@ using namespace mavsdk;
 
 #define PORT 10000
 
-#define PACKET_SIZE 65
+#define PACKET_SIZE 93
 
 #define PACKET_SIZE_RX 12
 
@@ -46,9 +48,17 @@ double gps_lon_val;
 double gps_lat_val;
 float gps_alt_val;
 
+float gps_hdop_val;
+float gps_vdop_val;
+int gps_num_satellites_val;
+
 unsigned char gps_lon_byte[sizeof(gps_lon_val)];
 unsigned char gps_lat_byte[sizeof(gps_lat_val)];
 unsigned char gps_alt_byte[sizeof(gps_alt_val)];
+
+unsigned char gps_hdop_byte[sizeof(gps_hdop_val)];
+unsigned char gps_vdop_byte[sizeof(gps_vdop_val)];
+unsigned char gps_num_satellites_byte[sizeof(gps_num_satellites_val)];
 
 #define VELOCITY_MESAGE 0x02
 float velocity_north_direction;
@@ -61,6 +71,8 @@ unsigned char velocity_down_byte[sizeof(velocity_down_direction)];
 
 #define COMPASS_MESAGE 0x03
 int compass_azimuth_val;
+
+unsigned char compass_azimuth_byte[sizeof(compass_azimuth_val)];
 
 #define IMU_MESAGE 0x04
 float imu_yaw_val;
@@ -82,12 +94,20 @@ unsigned char batt_current_byte[sizeof(batt_current)];
 unsigned char batt_charge_byte[sizeof(batt_charge)];
 unsigned char batt_remaining_byte[sizeof(batt_remaining)];
 
-#define PARAM_FLOAT_MESAGE 0x06
-std::string float_param_name;
-float float_param_value;
+// connection status 
+int connection_status_val = 0;
 
-unsigned char float_param_name_byte[sizeof(float_param_name)];
-unsigned char float_param_value_byte[sizeof(float_param_value)];
+unsigned char connection_status_byte[sizeof(connection_status_val)];
+
+//flight mode
+int flight_mode_val = 0;
+
+unsigned char flight_mode_byte[sizeof(flight_mode_val)];
+
+//ready to fly
+int ready_to_fly_val = 0;
+
+unsigned char ready_to_fly_byte[sizeof(ready_to_fly_val)];
 
 struct Packet {
   unsigned char data[PACKET_SIZE];
@@ -158,8 +178,23 @@ uint8_t crc_check_16bites(uint8_t *pbuf, uint32_t len, uint32_t *p_result) {
   return 2;
 }
 
+void mavlink_message_callback(const mavlink_message_t& msg) {
+    switch(msg.msgid) {
+        case MAVLINK_MSG_ID_VFR_HUD: {
+            mavlink_vfr_hud_t vfr_hud;
+            mavlink_msg_vfr_hud_decode(&msg, &vfr_hud);
+            std::cout << "Azimuth: " << vfr_hud.heading << std::endl;
+            compass_azimuth_val = vfr_hud.heading;
+            break;
+        }
+    }
+
+    std::cout << "74 compass" << std::endl;
+}
+
 int main(int argc, char **argv) {
-  int cliSockDes, readStatus;
+
+   int cliSockDes, readStatus;
   struct sockaddr_in serAddr;
   socklen_t serAddrLen;
   char msg[] = "Hello!!!\n";
@@ -174,6 +209,7 @@ int main(int argc, char **argv) {
   // server socket address
   serAddr.sin_family = AF_INET;
   serAddr.sin_port = htons(PORT);
+
   serAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
   Mavsdk mavsdk{Mavsdk::Configuration{Mavsdk::ComponentType::GroundStation}};
@@ -191,6 +227,8 @@ int main(int argc, char **argv) {
 
         if (system->has_autopilot()) {
           std::cout << "Discovered Autopilot from Client." << std::endl;
+          connection_status_val = 1;
+
           mavsdk.unsubscribe_on_new_system(handle);
           prom.set_value(system);
         } else {
@@ -211,14 +249,15 @@ int main(int argc, char **argv) {
   auto telemetry = std::make_shared<Telemetry>(system);
   auto mission_raw = std::make_shared<MissionRaw>(system);
 
-  auto set_rate_result = telemetry->set_rate_position(1.0);
+  // MavlinkPassthrough mavlink_passthrough(system);
 
-  if (set_rate_result != mavsdk::Telemetry::Result::Success) {
-    std::cout << "Setting rate failed:" << set_rate_result << std::endl;
-    return 1;
-  }
+  auto mavlink_passthrough = std::make_shared<MavlinkPassthrough>(system);
 
-  // altitude & GPS (long, lat)
+  mavlink_passthrough->subscribe_message(74, mavlink_message_callback);
+
+  std::cout << "Subscribe message: " << std::endl;
+
+  // altitude & gps (long, lat)
   telemetry->subscribe_position([](Telemetry::Position position) {
     std::cout << "Altitude & GPS (long, lat)" << std::endl;
     std::cout << "Altitude: " << position.absolute_altitude_m
@@ -229,6 +268,130 @@ int main(int argc, char **argv) {
     gps_lon_val = position.longitude_deg;
     gps_lat_val = position.latitude_deg;
   });
+
+  // gps hdop/vdop
+  telemetry->subscribe_raw_gps([](Telemetry::RawGps raw_gps) {
+    std::cout << "Gps hdop: " << raw_gps.hdop
+      << "  gps vdop: " << raw_gps.vdop << std::endl;
+
+    gps_hdop_val = raw_gps.hdop;
+    gps_vdop_val = raw_gps.vdop;
+
+  }); 
+
+  // gps number of satellites:
+  telemetry->subscribe_gps_info([](Telemetry::GpsInfo gps_info) {
+    std::cout << "Gps number of satellites: " << gps_info.num_satellites << std::endl;
+
+    gps_num_satellites_val = gps_info.num_satellites;
+  });
+
+  //flight mode
+  telemetry->subscribe_flight_mode([](Telemetry::FlightMode flight_mode) {
+    std::cout << "Flight mode: " << flight_mode << std::endl;
+
+    switch(flight_mode){
+      case Telemetry::FlightMode::Acro:
+        flight_mode_val = static_cast<int>(flight_mode);
+
+        std::cout << static_cast<int>(flight_mode) << std::endl;
+        break;
+
+      case Telemetry::FlightMode::Altctl:
+        flight_mode_val = static_cast<int>(flight_mode);
+
+        std::cout << static_cast<int>(flight_mode) << std::endl;
+        break;
+
+      case Telemetry::FlightMode::FollowMe:
+        flight_mode_val = static_cast<int>(flight_mode);
+
+        std::cout << static_cast<int>(flight_mode) << std::endl;
+        break;
+
+      case Telemetry::FlightMode::Hold:
+        flight_mode_val = static_cast<int>(flight_mode);
+
+        std::cout << static_cast<int>(flight_mode) << std::endl;
+        break;
+
+      case Telemetry::FlightMode::Land:
+        flight_mode_val = static_cast<int>(flight_mode);
+
+        std::cout << static_cast<int>(flight_mode) << std::endl;
+        break;
+
+      case Telemetry::FlightMode::Manual:
+        flight_mode_val = static_cast<int>(flight_mode);
+
+        std::cout << static_cast<int>(flight_mode) << std::endl;
+        break;
+
+      case Telemetry::FlightMode::Mission:
+        flight_mode_val = static_cast<int>(flight_mode);
+
+        std::cout << static_cast<int>(flight_mode) << std::endl;
+        break;
+
+      case Telemetry::FlightMode::Offboard:
+        flight_mode_val = static_cast<int>(flight_mode);
+
+        std::cout << static_cast<int>(flight_mode) << std::endl;
+        break;
+
+      case Telemetry::FlightMode::Posctl:
+        flight_mode_val = static_cast<int>(flight_mode);
+
+        std::cout << static_cast<int>(flight_mode) << std::endl;
+        break;
+
+      case Telemetry::FlightMode::Rattitude:
+        flight_mode_val = static_cast<int>(flight_mode);
+
+        std::cout << static_cast<int>(flight_mode) << std::endl;
+        break;
+
+      case Telemetry::FlightMode::Ready:
+        flight_mode_val = static_cast<int>(flight_mode);
+
+        std::cout << static_cast<int>(flight_mode) << std::endl;
+        break;
+
+      case Telemetry::FlightMode::ReturnToLaunch:
+        flight_mode_val = static_cast<int>(flight_mode);
+
+        std::cout << static_cast<int>(flight_mode) << std::endl;
+        break;
+
+      case Telemetry::FlightMode::Stabilized:
+        flight_mode_val = static_cast<int>(flight_mode);
+
+        std::cout << static_cast<int>(flight_mode) << std::endl;
+        break;
+
+        case Telemetry::FlightMode::Takeoff:
+        flight_mode_val = static_cast<int>(flight_mode);
+
+        std::cout << static_cast<int>(flight_mode) << std::endl;
+        break;
+
+      case Telemetry::FlightMode::Unknown:
+        flight_mode_val = static_cast<int>(flight_mode);
+
+        std::cout << static_cast<int>(flight_mode) << std::endl;
+        break;
+    }
+
+    std::cout << "Flight mode int: " << flight_mode_val << std::endl;
+  });
+
+  // ready to fly
+
+  bool result_health_all_ok = telemetry->health_all_ok();
+
+  if (result_health_all_ok == 1) {
+    ready_to_fly_val = 1;
+  }
 
   // velocity
   telemetry->subscribe_velocity_ned([](Telemetry::VelocityNed vel_ned) {
@@ -243,14 +406,6 @@ int main(int argc, char **argv) {
     velocity_north_direction = vel_ned.north_m_s;
     velocity_east_direction = vel_ned.east_m_s;
     velocity_down_direction = vel_ned.down_m_s;
-  });
-
-  // compass azimuth
-  telemetry->subscribe_attitude_euler([](Telemetry::EulerAngle euler_angle) {
-    std::cout << "Compass azimuth" << std::endl;
-    std::cout << euler_angle.yaw_deg << std::endl;
-
-    compass_azimuth_val = euler_angle.yaw_deg;
   });
 
   // roll, pitch & yaw
@@ -313,6 +468,14 @@ int main(int argc, char **argv) {
     memcpy(batt_charge_byte, &batt_charge, sizeof(float));
     memcpy(batt_remaining_byte, &batt_remaining, sizeof(float));
 
+    memcpy(connection_status_byte, &connection_status_val, sizeof(int));
+
+    memcpy(flight_mode_byte, &flight_mode_val, sizeof(int));
+
+    memcpy(ready_to_fly_byte, &ready_to_fly_val, sizeof(int));
+
+    memcpy(compass_azimuth_byte, &compass_azimuth_val, sizeof(int));
+
     // Set to buf
     packet.data[0] = 0x55; // STX  starting mark Low byte in the front
     packet.data[1] = 0x66; // STX  starting mark Low byte in the front
@@ -339,59 +502,95 @@ int main(int argc, char **argv) {
     packet.data[19] = gps_alt_byte[1];
     packet.data[20] = gps_alt_byte[2];
     packet.data[21] = gps_alt_byte[3];
+
+    packet.data[22] = gps_hdop_byte[0];
+    packet.data[23] = gps_hdop_byte[1];
+    packet.data[24] = gps_hdop_byte[2];
+    packet.data[25] = gps_hdop_byte[3];
+
+    packet.data[26] = gps_vdop_byte[0];
+    packet.data[27] = gps_vdop_byte[1];
+    packet.data[28] = gps_vdop_byte[2];
+    packet.data[29] = gps_vdop_byte[3];
+
+    packet.data[30] = gps_num_satellites_byte[0];
+    packet.data[31] = gps_num_satellites_byte[1];
+    packet.data[32] = gps_num_satellites_byte[2];
+    packet.data[33] = gps_num_satellites_byte[3];
     //////////////////////////////////////////////////////////////////////////
-    packet.data[22] = velocity_north_byte[0];
-    packet.data[23] = velocity_north_byte[1];
-    packet.data[24] = velocity_north_byte[2];
-    packet.data[25] = velocity_north_byte[3];
+    packet.data[34] = velocity_north_byte[0];
+    packet.data[35] = velocity_north_byte[1];
+    packet.data[36] = velocity_north_byte[2]; 
+    packet.data[37] = velocity_north_byte[3];
 
-    packet.data[26] = velocity_east_byte[0];
-    packet.data[27] = velocity_east_byte[1];
-    packet.data[28] = velocity_east_byte[2];
-    packet.data[29] = velocity_east_byte[3];
+    packet.data[38] = velocity_east_byte[0];
+    packet.data[39] = velocity_east_byte[1];
+    packet.data[40] = velocity_east_byte[2]; 
+    packet.data[41] = velocity_east_byte[3];
 
-    packet.data[30] = velocity_down_byte[0];
-    packet.data[31] = velocity_down_byte[1];
-    packet.data[32] = velocity_down_byte[2];
-    packet.data[33] = velocity_down_byte[3];
+    packet.data[42] = velocity_down_byte[0];
+    packet.data[43] = velocity_down_byte[1];
+    packet.data[44] = velocity_down_byte[2]; 
+    packet.data[45] = velocity_down_byte[3];  
     //////////////////////////////////////////////////////////////////////////
-    packet.data[34] = imu_yaw_byte[0];
-    packet.data[35] = imu_yaw_byte[1];
-    packet.data[36] = imu_yaw_byte[2];
-    packet.data[37] = imu_yaw_byte[3];
+    packet.data[46] = imu_yaw_byte[0];
+    packet.data[47] = imu_yaw_byte[1];
+    packet.data[48] = imu_yaw_byte[2]; 
+    packet.data[49] = imu_yaw_byte[3];
 
-    packet.data[38] = imu_pitch_byte[0];
-    packet.data[39] = imu_pitch_byte[1];
-    packet.data[40] = imu_pitch_byte[2];
-    packet.data[41] = imu_pitch_byte[3];
+    packet.data[50] = imu_pitch_byte[0];
+    packet.data[51] = imu_pitch_byte[1];
+    packet.data[52] = imu_pitch_byte[2]; 
+    packet.data[53] = imu_pitch_byte[3];
 
-    packet.data[42] = imu_rool_byte[0];
-    packet.data[43] = imu_rool_byte[1];
-    packet.data[44] = imu_rool_byte[2];
-    packet.data[45] = imu_rool_byte[3];
+    packet.data[54] = imu_rool_byte[0];
+    packet.data[55] = imu_rool_byte[1];
+    packet.data[56] = imu_rool_byte[2]; 
+    packet.data[57] = imu_rool_byte[3];    
     //////////////////////////////////////////////////////////////////////////
-    packet.data[46] = batt_voltage_byte[0];
-    packet.data[47] = batt_voltage_byte[1];
-    packet.data[48] = batt_voltage_byte[2];
-    packet.data[49] = batt_voltage_byte[3];
+    packet.data[58] = batt_voltage_byte[0];
+    packet.data[59] = batt_voltage_byte[1];
+    packet.data[60] = batt_voltage_byte[2]; 
+    packet.data[61] = batt_voltage_byte[3];
 
-    packet.data[50] = batt_current_byte[0];
-    packet.data[51] = batt_current_byte[1];
-    packet.data[52] = batt_current_byte[2];
-    packet.data[53] = batt_current_byte[3];
+    packet.data[62] = batt_current_byte[0];
+    packet.data[63] = batt_current_byte[1];
+    packet.data[64] = batt_current_byte[2]; 
+    packet.data[65] = batt_current_byte[3];
 
-    packet.data[54] = batt_charge_byte[0];
-    packet.data[55] = batt_charge_byte[1];
-    packet.data[56] = batt_charge_byte[2];
-    packet.data[57] = batt_charge_byte[3];
+    packet.data[66] = batt_charge_byte[0];
+    packet.data[67] = batt_charge_byte[1];
+    packet.data[68] = batt_charge_byte[2]; 
+    packet.data[69] = batt_charge_byte[3];    
 
-    packet.data[58] = batt_remaining_byte[0];
-    packet.data[59] = batt_remaining_byte[1];
-    packet.data[60] = batt_remaining_byte[2];
-    packet.data[61] = batt_remaining_byte[3];
+    packet.data[70] = batt_remaining_byte[0];
+    packet.data[71] = batt_remaining_byte[1];
+    packet.data[72] = batt_remaining_byte[2]; 
+    packet.data[73] = batt_remaining_byte[3]; 
+
+    packet.data[74] = connection_status_byte[0];
+    packet.data[75] = connection_status_byte[1];
+    packet.data[76] = connection_status_byte[2];
+    packet.data[77] = connection_status_byte[3];
+
+    packet.data[78] = flight_mode_byte[0];
+    packet.data[79] = flight_mode_byte[1];
+    packet.data[80] = flight_mode_byte[2];
+    packet.data[81] = flight_mode_byte[3];
+
+    packet.data[82] = ready_to_fly_byte[0];
+    packet.data[83] = ready_to_fly_byte[1];
+    packet.data[84] = ready_to_fly_byte[2];
+    packet.data[85] = ready_to_fly_byte[3];
+
+    packet.data[86] = compass_azimuth_byte[0];
+    packet.data[87] = compass_azimuth_byte[1];
+    packet.data[88] = compass_azimuth_byte[2];
+    packet.data[89] = compass_azimuth_byte[3];
+
     //////////////////////////////////////////////////////////////////////////
-    packet.data[62] = 0x03;
-    packet.data[63] = 0x07;
+    packet.data[90] = 0x03; 
+    packet.data[91] = 0x07;
 
     // Calc to CRC16
     packet.crc16 = CRC16_cal(packet.data, PACKET_SIZE - 2, *crc16_tab);
@@ -400,77 +599,77 @@ int main(int argc, char **argv) {
     packet.data[PACKET_SIZE - 2] = (char)(packet.crc16 & 0xFF);
     packet.data[PACKET_SIZE - 1] = (char)((packet.crc16 >> 8) & 0xFF);
 
-    switch (flag_read_waypoint) {
-    case 1: {
-      auto waypoints = mission_raw->download_mission();
-      std::cout << "Downloading mission...";
-      auto result_download = waypoints.first;
+//     switch (flag_read_waypoint) {
+//     case 1: {
+//       auto waypoints = mission_raw->download_mission();
+//       std::cout << "Downloading mission...";
+//       auto result_download = waypoints.first;
 
-      if (result_download != MissionRaw::Result::Success) {
-        std::cout << "Mission does not download."
-                  << " " << result_download << std::endl;
-      }
+//       if (result_download != MissionRaw::Result::Success) {
+//         std::cout << "Mission does not download."
+//                   << " " << result_download << std::endl;
+//       }
 
-      std::this_thread::sleep_for(std::chrono::seconds(10));
+//       std::this_thread::sleep_for(std::chrono::seconds(10));
 
-#if defined(DEBUG)
-      for (auto wp : waypoints.second) {
-        std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
-      }
-#endif
+// #if defined(DEBUG)
+//       for (auto wp : waypoints.second) {
+//         std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
+//       }
+// #endif
 
-      readWaypoints(waypoints.second, "mission.plan");
-      break;
-    }
-    default:
-      break;
-    }
+//       readWaypoints(waypoints.second, "mission.plan");
+//       break;
+//     }
+//     default:
+//       break;
+//     }
 
-    switch (flag_write_waypoint) {
-    case 1: {
-      auto waypoints = writeWaypoints("mission.plan");
+//     switch (flag_write_waypoint) {
+//     case 1: {
+//       auto waypoints = writeWaypoints("mission.plan");
 
-      std::cout << sizeof(waypoints);
-      std::this_thread::sleep_for(std::chrono::seconds(10));
+//       std::cout << sizeof(waypoints);
+//       std::this_thread::sleep_for(std::chrono::seconds(10));
 
-      std::cout << "Uploading mission...";
-      auto result_upload = mission_raw->upload_mission(waypoints);
+//       std::cout << "Uploading mission...";
+//       auto result_upload = mission_raw->upload_mission(waypoints);
 
-      if (result_upload != MissionRaw::Result::Success) {
-        std::cout << "Mission does not upload."
-                  << " " << result_upload << std::endl;
-      }
-      break;
-    }
-    default:
-      break;
-    }
+//       if (result_upload != MissionRaw::Result::Success) {
+//         std::cout << "Mission does not upload."
+//                   << " " << result_upload << std::endl;
+//       }
+//       break;
+//     }
+//     default:
+//       break;
+//     }
 
-    // switch (flag_read_param) {
-    // case 1: {
-    //   auto all_parameters = param->get_all_params();
-    //   readParams("file.parm", all_parameters);
-    //   break;
-    // }
-    // default:
-    //   break;
-    // }
+//     switch (flag_read_param) {
+//     case 1: {
+//       auto all_parameters = param->get_all_params();
+//       readParams("file.parm", all_parameters);
+//       break;
+//     }
+//     default:
+//       break;
+//     }
 
-    // switch (flag_write_param) {
-    // case 1: {
-    //   auto parameters = writeParams("mav.parm");
-    //   std::cout << "Parameters succesfully written to the file!" << std::endl;
+//     switch (flag_write_param) {
+//     case 1: {
+//       auto parameters = writeParams("mav.parm");
+//       std::cout << "Parameters succesfully written to the file!" << std::endl;
 
-    //   for (auto param_int : parameters.int_params) {
-    //     param->set_param_int(param_int.name, param_int.value);
-    //   }
-    //   for (auto param_float : parameters.float_params) {
-    //     param->set_param_float(param_float.name, param_float.value);
-    //   }
-    // }
-    // default:
-    //   break;
-    // }
+//       for (auto param_int : parameters.int_params) {
+//         param->set_param_int(param_int.name, param_int.value);
+//       }
+//       for (auto param_float : parameters.float_params) {
+//         param->set_param_float(param_float.name, param_float.value);
+//       }
+//     }
+//     default:
+//       break;
+//     }
 
     // Send
     if (sendto(cliSockDes, packet.data, sizeof(packet.data), 0,
@@ -484,6 +683,7 @@ int main(int argc, char **argv) {
     serAddrLen = sizeof(serAddr);
     readStatus = recvfrom(cliSockDes, packetRX.data, sizeof(packetRX.data), 0,
                           (struct sockaddr *)&serAddr, &serAddrLen);
+
     if (readStatus < 0) {
       perror("reading error...\n");
       // close(cliSockDes);
