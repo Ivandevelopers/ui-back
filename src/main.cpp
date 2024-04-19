@@ -24,7 +24,7 @@
 
 using namespace mavsdk;
 
-// #define DEBUG
+#define DEBUG
 
 #define PORT 10000
 
@@ -197,7 +197,7 @@ void mavlink_message_callback(const mavlink_message_t &msg)
   }
   }
 
-  std::cout << "74 compass" << std::endl;
+  // std::cout << "74 compass" << std::endl;
 }
 
 int main(int argc, char **argv)
@@ -272,10 +272,10 @@ int main(int argc, char **argv)
   // altitude & gps (long, lat)
   telemetry->subscribe_position([](Telemetry::Position position)
                                 {
-    std::cout << "Altitude & GPS (long, lat)" << std::endl;
-    std::cout << "Altitude: " << position.absolute_altitude_m
-              << " Latitude: " << position.latitude_deg
-              << " Longitude: " << position.longitude_deg << std::endl;
+    // std::cout << "Altitude & GPS (long, lat)" << std::endl;
+    // std::cout << "Altitude: " << position.absolute_altitude_m
+    //           << " Latitude: " << position.latitude_deg
+    //           << " Longitude: " << position.longitude_deg << std::endl;
 
     gps_alt_val = position.absolute_altitude_m;
     gps_lon_val = position.longitude_deg;
@@ -284,118 +284,119 @@ int main(int argc, char **argv)
   // gps hdop/vdop
   telemetry->subscribe_raw_gps([](Telemetry::RawGps raw_gps)
                                {
-                                 std::cout << "Gps hdop: " << raw_gps.hdop
-                                           << "  gps vdop: " << raw_gps.vdop << std::endl;
+                                //  std::cout << "Gps hdop: " << raw_gps.hdop
+                                //            << "  gps vdop: " << raw_gps.vdop << std::endl;
 
                                  gps_hdop_val = raw_gps.hdop;
-                                 gps_vdop_val = raw_gps.vdop;
-                               });
+                                 gps_vdop_val = raw_gps.vdop; });
 
   // gps number of satellites:
   telemetry->subscribe_gps_info([](Telemetry::GpsInfo gps_info)
                                 {
-    std::cout << "Gps number of satellites: " << gps_info.num_satellites << std::endl;
+    // std::cout << "Gps number of satellites: " << gps_info.num_satellites << std::endl;
 
     gps_num_satellites_val = gps_info.num_satellites; });
 
   // flight mode
   telemetry->subscribe_flight_mode([](Telemetry::FlightMode flight_mode)
                                    {
-    std::cout << "Flight mode: " << flight_mode << std::endl;
+                                     // std::cout << "Flight mode: " << flight_mode << std::endl;
 
-    switch(flight_mode){
-      case Telemetry::FlightMode::Acro:
-        flight_mode_val = static_cast<int>(flight_mode);
+                                     switch (flight_mode)
+                                     {
+                                     case Telemetry::FlightMode::Acro:
+                                       flight_mode_val = static_cast<int>(flight_mode);
 
-        std::cout << static_cast<int>(flight_mode) << std::endl;
-        break;
+                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       break;
 
-      case Telemetry::FlightMode::Altctl:
-        flight_mode_val = static_cast<int>(flight_mode);
+                                     case Telemetry::FlightMode::Altctl:
+                                       flight_mode_val = static_cast<int>(flight_mode);
 
-        std::cout << static_cast<int>(flight_mode) << std::endl;
-        break;
+                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       break;
 
-      case Telemetry::FlightMode::FollowMe:
-        flight_mode_val = static_cast<int>(flight_mode);
+                                     case Telemetry::FlightMode::FollowMe:
+                                       flight_mode_val = static_cast<int>(flight_mode);
 
-        std::cout << static_cast<int>(flight_mode) << std::endl;
-        break;
+                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       break;
 
-      case Telemetry::FlightMode::Hold:
-        flight_mode_val = static_cast<int>(flight_mode);
+                                     case Telemetry::FlightMode::Hold:
+                                       flight_mode_val = static_cast<int>(flight_mode);
 
-        std::cout << static_cast<int>(flight_mode) << std::endl;
-        break;
+                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       break;
 
-      case Telemetry::FlightMode::Land:
-        flight_mode_val = static_cast<int>(flight_mode);
+                                     case Telemetry::FlightMode::Land:
+                                       flight_mode_val = static_cast<int>(flight_mode);
 
-        std::cout << static_cast<int>(flight_mode) << std::endl;
-        break;
+                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       break;
 
-      case Telemetry::FlightMode::Manual:
-        flight_mode_val = static_cast<int>(flight_mode);
+                                     case Telemetry::FlightMode::Manual:
+                                       flight_mode_val = static_cast<int>(flight_mode);
 
-        std::cout << static_cast<int>(flight_mode) << std::endl;
-        break;
+                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       break;
 
-      case Telemetry::FlightMode::Mission:
-        flight_mode_val = static_cast<int>(flight_mode);
+                                     case Telemetry::FlightMode::Mission:
+                                       flight_mode_val = static_cast<int>(flight_mode);
 
-        std::cout << static_cast<int>(flight_mode) << std::endl;
-        break;
+                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       break;
 
-      case Telemetry::FlightMode::Offboard:
-        flight_mode_val = static_cast<int>(flight_mode);
+                                     case Telemetry::FlightMode::Offboard:
+                                       flight_mode_val = static_cast<int>(flight_mode);
 
-        std::cout << static_cast<int>(flight_mode) << std::endl;
-        break;
+                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       break;
 
-      case Telemetry::FlightMode::Posctl:
-        flight_mode_val = static_cast<int>(flight_mode);
+                                     case Telemetry::FlightMode::Posctl:
+                                       flight_mode_val = static_cast<int>(flight_mode);
 
-        std::cout << static_cast<int>(flight_mode) << std::endl;
-        break;
+                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       break;
 
-      case Telemetry::FlightMode::Rattitude:
-        flight_mode_val = static_cast<int>(flight_mode);
+                                     case Telemetry::FlightMode::Rattitude:
+                                       flight_mode_val = static_cast<int>(flight_mode);
 
-        std::cout << static_cast<int>(flight_mode) << std::endl;
-        break;
+                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       break;
 
-      case Telemetry::FlightMode::Ready:
-        flight_mode_val = static_cast<int>(flight_mode);
+                                     case Telemetry::FlightMode::Ready:
+                                       flight_mode_val = static_cast<int>(flight_mode);
 
-        std::cout << static_cast<int>(flight_mode) << std::endl;
-        break;
+                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       break;
 
-      case Telemetry::FlightMode::ReturnToLaunch:
-        flight_mode_val = static_cast<int>(flight_mode);
+                                     case Telemetry::FlightMode::ReturnToLaunch:
+                                       flight_mode_val = static_cast<int>(flight_mode);
 
-        std::cout << static_cast<int>(flight_mode) << std::endl;
-        break;
+                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       break;
 
-      case Telemetry::FlightMode::Stabilized:
-        flight_mode_val = static_cast<int>(flight_mode);
+                                     case Telemetry::FlightMode::Stabilized:
+                                       flight_mode_val = static_cast<int>(flight_mode);
 
-        std::cout << static_cast<int>(flight_mode) << std::endl;
-        break;
+                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       break;
 
-        case Telemetry::FlightMode::Takeoff:
-        flight_mode_val = static_cast<int>(flight_mode);
+                                     case Telemetry::FlightMode::Takeoff:
+                                       flight_mode_val = static_cast<int>(flight_mode);
 
-        std::cout << static_cast<int>(flight_mode) << std::endl;
-        break;
+                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       break;
 
-      case Telemetry::FlightMode::Unknown:
-        flight_mode_val = static_cast<int>(flight_mode);
+                                     case Telemetry::FlightMode::Unknown:
+                                       flight_mode_val = static_cast<int>(flight_mode);
 
-        std::cout << static_cast<int>(flight_mode) << std::endl;
-        break;
-    }
+                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       break;
+                                     }
 
-    std::cout << "Flight mode int: " << flight_mode_val << std::endl; });
+                                     // std::cout << "Flight mode int: " << flight_mode_val << std::endl;
+                                   });
 
   // ready to fly
 
@@ -409,13 +410,13 @@ int main(int argc, char **argv)
   // velocity
   telemetry->subscribe_velocity_ned([](Telemetry::VelocityNed vel_ned)
                                     {
-    std::cout << "Velocity" << std::endl;
-    std::cout << "Velocity along north direction in metres per second: "
-              << vel_ned.north_m_s << " "
-              << "velocity along east direction in metres per second: "
-              << vel_ned.east_m_s << " "
-              << "velocity along down direction in metres per second: "
-              << vel_ned.down_m_s << std::endl;
+    // std::cout << "Velocity" << std::endl;
+    // std::cout << "Velocity along north direction in metres per second: "
+    //           << vel_ned.north_m_s << " "
+    //           << "velocity along east direction in metres per second: "
+    //           << vel_ned.east_m_s << " "
+    //           << "velocity along down direction in metres per second: "
+    //           << vel_ned.down_m_s << std::endl;
 
     velocity_north_direction = vel_ned.north_m_s;
     velocity_east_direction = vel_ned.east_m_s;
@@ -425,13 +426,13 @@ int main(int argc, char **argv)
   telemetry->subscribe_attitude_angular_velocity_body(
       [](Telemetry::AngularVelocityBody angular_velocity_body)
       {
-        std::cout << "Roll, pitch, yaw" << std::endl;
-        std::cout << "Roll angular velocity: "
-                  << angular_velocity_body.roll_rad_s << std::endl
-                  << "Pitch angular velocity: "
-                  << angular_velocity_body.pitch_rad_s << std::endl
-                  << "Yaw angular velocity: " << angular_velocity_body.yaw_rad_s
-                  << '\n';
+        // std::cout << "Roll, pitch, yaw" << std::endl;
+        // std::cout << "Roll angular velocity: "
+        //           << angular_velocity_body.roll_rad_s << std::endl
+        //           << "Pitch angular velocity: "
+        //           << angular_velocity_body.pitch_rad_s << std::endl
+        //           << "Yaw angular velocity: " << angular_velocity_body.yaw_rad_s
+        //           << '\n';
 
         imu_rool_val = angular_velocity_body.roll_rad_s;
         imu_pitch_val = angular_velocity_body.pitch_rad_s;
@@ -441,13 +442,13 @@ int main(int argc, char **argv)
   // battery
   telemetry->subscribe_battery([](Telemetry::Battery battery)
                                {
-    std::cout << "Battery" << std::endl;
-    std::cout << "Voltage: " << battery.voltage_v << std::endl
-              << "Battery current: " << battery.current_battery_a << std::endl
-              << "Consumed charge: " << battery.capacity_consumed_ah
-              << std::endl
-              << "Estimated battery remaining: " << battery.remaining_percent
-              << '\n';
+    // std::cout << "Battery" << std::endl;
+    // std::cout << "Voltage: " << battery.voltage_v << std::endl
+    //           << "Battery current: " << battery.current_battery_a << std::endl
+    //           << "Consumed charge: " << battery.capacity_consumed_ah
+    //           << std::endl
+    //           << "Estimated battery remaining: " << battery.remaining_percent
+    //           << '\n';
 
     batt_voltage = battery.voltage_v;
     batt_current = battery.current_battery_a;
@@ -660,15 +661,17 @@ int main(int argc, char **argv)
     //       break;
     //     }
 
-    //     switch (flag_read_param) {
-    //     case 1: {
-    //       auto all_parameters = param->get_all_params();
-    //       readParams("file.parm", all_parameters);
-    //       break;
-    //     }
-    //     default:
-    //       break;
-    //     }
+    switch (flag_read_param)
+    {
+    case 1:
+    {
+      auto all_parameters = param->get_all_params();
+      readParams("file.parm", all_parameters);
+      break;
+    }
+    default:
+      break;
+    }
 
     //     switch (flag_write_param) {
     //     case 1: {

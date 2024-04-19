@@ -23,6 +23,8 @@ Run the project
 ./build/autopilot_control
 ```
 
+mavproxy.py --out 127.0.0.1:14550
+
 > [!NOTE]
 > For more information about MAVSDK and its usage, refer to the [official documentation](https://mavsdk.mavlink.io/main/en/cpp/guide/).
 
