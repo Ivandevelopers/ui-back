@@ -24,13 +24,41 @@
 
 using namespace mavsdk;
 
-#define DEBUG
+// #define DEBUG
 
 #define PORT 10000
+
+#define TELEMETRY_PORT "udp://:14550" // 14552
 
 #define PACKET_SIZE 93
 
 #define PACKET_SIZE_RX 12
+
+// dev
+#define DIR_NAME "/data/"
+#define MISSION_WP_FILENAME "mission.plan"
+#include <pwd.h>
+std::string destDirPath;
+std::string getDestDirPath()
+{
+  if (!destDirPath.empty())
+  {
+    return destDirPath;
+  }
+
+  const char *homeEnv = getenv("HOME");
+  if (homeEnv != nullptr)
+  {
+    destDirPath = homeEnv;
+  }
+  else
+  {
+    destDirPath = getpwuid(getuid())->pw_dir;
+  }
+  destDirPath += DIR_NAME;
+
+  return destDirPath;
+}
 
 int flag_read_waypoint = 0;
 int flag_write_waypoint = 0;
@@ -191,7 +219,7 @@ void mavlink_message_callback(const mavlink_message_t &msg)
   {
     mavlink_vfr_hud_t vfr_hud;
     mavlink_msg_vfr_hud_decode(&msg, &vfr_hud);
-    std::cout << "Azimuth: " << vfr_hud.heading << std::endl;
+    // std::cout << "Azimuth: " << vfr_hud.heading << std::endl;
     compass_azimuth_val = vfr_hud.heading;
     break;
   }
@@ -202,7 +230,6 @@ void mavlink_message_callback(const mavlink_message_t &msg)
 
 int main(int argc, char **argv)
 {
-
   int cliSockDes, readStatus;
   struct sockaddr_in serAddr;
   socklen_t serAddrLen;
@@ -224,7 +251,9 @@ int main(int argc, char **argv)
 
   Mavsdk mavsdk{Mavsdk::Configuration{Mavsdk::ComponentType::GroundStation}};
 
-  auto connection_result = mavsdk.add_any_connection("udp://:14550");
+  // auto connection_result = mavsdk.add_any_connection("udp://:14550");
+  auto connection_result = mavsdk.add_any_connection(TELEMETRY_PORT);
+
   if (connection_result == mavsdk::ConnectionResult::Success)
   {
     std::cout << "Connected!" << std::endl;
@@ -307,91 +336,91 @@ int main(int argc, char **argv)
                                      case Telemetry::FlightMode::Acro:
                                        flight_mode_val = static_cast<int>(flight_mode);
 
-                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Altctl:
                                        flight_mode_val = static_cast<int>(flight_mode);
 
-                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::FollowMe:
                                        flight_mode_val = static_cast<int>(flight_mode);
 
-                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Hold:
                                        flight_mode_val = static_cast<int>(flight_mode);
 
-                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Land:
                                        flight_mode_val = static_cast<int>(flight_mode);
 
-                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Manual:
                                        flight_mode_val = static_cast<int>(flight_mode);
 
-                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Mission:
                                        flight_mode_val = static_cast<int>(flight_mode);
 
-                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Offboard:
                                        flight_mode_val = static_cast<int>(flight_mode);
 
-                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Posctl:
                                        flight_mode_val = static_cast<int>(flight_mode);
 
-                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Rattitude:
                                        flight_mode_val = static_cast<int>(flight_mode);
 
-                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Ready:
                                        flight_mode_val = static_cast<int>(flight_mode);
 
-                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::ReturnToLaunch:
                                        flight_mode_val = static_cast<int>(flight_mode);
 
-                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Stabilized:
                                        flight_mode_val = static_cast<int>(flight_mode);
 
-                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Takeoff:
                                        flight_mode_val = static_cast<int>(flight_mode);
 
-                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Unknown:
                                        flight_mode_val = static_cast<int>(flight_mode);
 
-                                       std::cout << static_cast<int>(flight_mode) << std::endl;
+                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
                                      }
 
@@ -615,79 +644,99 @@ int main(int argc, char **argv)
     packet.data[PACKET_SIZE - 2] = (char)(packet.crc16 & 0xFF);
     packet.data[PACKET_SIZE - 1] = (char)((packet.crc16 >> 8) & 0xFF);
 
-    //     switch (flag_read_waypoint) {
-    //     case 1: {
-    //       auto waypoints = mission_raw->download_mission();
-    //       std::cout << "Downloading mission...";
-    //       auto result_download = waypoints.first;
-
-    //       if (result_download != MissionRaw::Result::Success) {
-    //         std::cout << "Mission does not download."
-    //                   << " " << result_download << std::endl;
-    //       }
-
-    //       std::this_thread::sleep_for(std::chrono::seconds(10));
-
-    // #if defined(DEBUG)
-    //       for (auto wp : waypoints.second) {
-    //         std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
-    //       }
-    // #endif
-
-    //       readWaypoints(waypoints.second, "mission.plan");
-    //       break;
-    //     }
-    //     default:
-    //       break;
-    //     }
-
-    //     switch (flag_write_waypoint) {
-    //     case 1: {
-    //       auto waypoints = writeWaypoints("mission.plan");
-
-    //       std::cout << sizeof(waypoints);
-    //       std::this_thread::sleep_for(std::chrono::seconds(10));
-
-    //       std::cout << "Uploading mission...";
-    //       auto result_upload = mission_raw->upload_mission(waypoints);
-
-    //       if (result_upload != MissionRaw::Result::Success) {
-    //         std::cout << "Mission does not upload."
-    //                   << " " << result_upload << std::endl;
-    //       }
-    //       break;
-    //     }
-    //     default:
-    //       break;
-    //     }
-
-    switch (flag_read_param)
+    switch (flag_read_waypoint)
     {
     case 1:
     {
-      auto all_parameters = param->get_all_params();
-      readParams("file.parm", all_parameters);
+      // todo research::should we use async?
+      auto waypoints = mission_raw->download_mission();
+      std::cout << "Downloading mission..." << std::endl;
+
+      auto result_download = waypoints.first;
+
+      if (result_download != MissionRaw::Result::Success)
+      {
+        std::cout << "Mission does not download."
+                  << " " << result_download << std::endl;
+      }
+
+      std::this_thread::sleep_for(std::chrono::seconds(10));
+
+#if defined(DEBUG)
+      for (auto wp : waypoints.second)
+      {
+        std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
+      }
+#endif
+
+      readWaypoints(waypoints.second, getDestDirPath() + MISSION_WP_FILENAME);
+
       break;
     }
     default:
       break;
     }
 
-    //     switch (flag_write_param) {
-    //     case 1: {
-    //       auto parameters = writeParams("mav.parm");
-    //       std::cout << "Parameters succesfully written to the file!" << std::endl;
+    switch (flag_write_waypoint)
+    {
+    case 1:
+    {
+      std::cout << "Writing waypoints..." << std::endl;
+      auto waypoints = writeWaypoints(getDestDirPath() + MISSION_WP_FILENAME);
 
-    //       for (auto param_int : parameters.int_params) {
-    //         param->set_param_int(param_int.name, param_int.value);
-    //       }
-    //       for (auto param_float : parameters.float_params) {
-    //         param->set_param_float(param_float.name, param_float.value);
-    //       }
-    //     }
-    //     default:
-    //       break;
-    //     }
+      std::cout << sizeof(waypoints);
+      std::this_thread::sleep_for(std::chrono::seconds(10));
+
+      auto result_upload = mission_raw->upload_mission(waypoints);
+
+      if (result_upload != MissionRaw::Result::Success)
+      {
+        std::cout << "Mission does not upload."
+                  << " " << result_upload << std::endl;
+      }
+      else
+      {
+        std::cout << "Mission uploaded." << std::endl;
+      }
+
+      break;
+    }
+    default:
+      break;
+    }
+
+    switch (flag_read_param)
+    {
+    case 1:
+    {
+      std::cout << "Reading parameters..." << std::endl;
+      auto all_parameters = param->get_all_params();
+      readParams(getDestDirPath() + "file.parm", all_parameters);
+      break;
+    }
+    default:
+      break;
+    }
+
+    switch (flag_write_param)
+    {
+    case 1:
+    {
+      auto parameters = writeParams(getDestDirPath() + "mav.parm");
+      std::cout << "Parameters succesfully written to the file!" << std::endl;
+
+      for (auto param_int : parameters.int_params)
+      {
+        param->set_param_int(param_int.name, param_int.value);
+      }
+      for (auto param_float : parameters.float_params)
+      {
+        param->set_param_float(param_float.name, param_float.value);
+      }
+    }
+    default:
+      break;
+    }
 
     // Send
     if (sendto(cliSockDes, packet.data, sizeof(packet.data), 0,
@@ -697,6 +746,10 @@ int main(int argc, char **argv)
       // close(cliSockDes);
       // exit(-1);
     }
+    // else
+    // {
+    //   std::cout << "Sending data..." << std::endl;
+    // }
 
     // Read
     serAddrLen = sizeof(serAddr);
