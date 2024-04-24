@@ -28,7 +28,7 @@ using namespace mavsdk;
 
 #define PORT 10000
 
-#define PACKET_SIZE 93
+#define PACKET_SIZE 94
 
 #define PACKET_SIZE_RX 12
 
@@ -109,6 +109,10 @@ int ready_to_fly_val = 0;
 
 unsigned char ready_to_fly_byte[sizeof(ready_to_fly_val)];
 
+// rssi
+uint8_t rssi_val;
+unsigned char rssi_byte[sizeof(rssi_val)];
+
 struct Packet {
   unsigned char data[PACKET_SIZE];
   uint16_t crc16;
@@ -187,9 +191,16 @@ void mavlink_message_callback(const mavlink_message_t& msg) {
             compass_azimuth_val = vfr_hud.heading;
             break;
         }
-    }
+        case MAVLINK_MSG_ID_RC_CHANNELS: {
+          mavlink_rc_channels_t rc_channels;
+          mavlink_msg_rc_channels_decode(&msg, &rc_channels);
+          std::cout << "RSSI: " << static_cast<unsigned int>(rc_channels.rssi) << std::endl;
 
-    std::cout << "74 compass" << std::endl;
+          rssi_val = rc_channels.rssi;
+          break;
+
+        }
+    }
 }
 
 int main(int argc, char **argv) {
@@ -254,6 +265,8 @@ int main(int argc, char **argv) {
   auto mavlink_passthrough = std::make_shared<MavlinkPassthrough>(system);
 
   mavlink_passthrough->subscribe_message(74, mavlink_message_callback);
+
+  mavlink_passthrough->subscribe_message(65, mavlink_message_callback);
 
   std::cout << "Subscribe message: " << std::endl;
 
@@ -476,6 +489,8 @@ int main(int argc, char **argv) {
 
     memcpy(compass_azimuth_byte, &compass_azimuth_val, sizeof(int));
 
+    memcpy(rssi_byte, &rssi_val, sizeof(uint8_t));
+
     // Set to buf
     packet.data[0] = 0x55; // STX  starting mark Low byte in the front
     packet.data[1] = 0x66; // STX  starting mark Low byte in the front
@@ -588,9 +603,11 @@ int main(int argc, char **argv) {
     packet.data[88] = compass_azimuth_byte[2];
     packet.data[89] = compass_azimuth_byte[3];
 
+    packet.data[90] = rssi_byte[0];
+
     //////////////////////////////////////////////////////////////////////////
-    packet.data[90] = 0x03; 
-    packet.data[91] = 0x07;
+    packet.data[91] = 0x03; 
+    packet.data[92] = 0x07;
 
     // Calc to CRC16
     packet.crc16 = CRC16_cal(packet.data, PACKET_SIZE - 2, *crc16_tab);
