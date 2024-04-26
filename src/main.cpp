@@ -30,7 +30,7 @@ using namespace mavsdk;
 
 #define CONNECTION_PORT "udp://:14550" // 14552
 
-#define PACKET_SIZE 97
+#define PACKET_SIZE 101
 
 #define PACKET_SIZE_RX 12
 
@@ -62,8 +62,21 @@ std::string getDestDirPath()
 
 int flag_read_waypoint = 0;
 int flag_write_waypoint = 0;
+
 int flag_read_param = 0;
 int flag_write_param = 0;
+
+bool flag_result_read_waypoint = 0;
+bool flag_result_write_waypoint = 0;
+
+bool flag_result_read_param = 0;
+bool flag_result_write_param = 0;
+
+unsigned char flag_result_read_waypoint_byte[sizeof(flag_read_waypoint)];
+unsigned char flag_result_write_waypoint_byte[sizeof(flag_write_waypoint)];
+
+unsigned char flag_result_read_param_byte[sizeof(flag_read_param)];
+unsigned char flag_result_write_param_byte[sizeof(flag_write_param)];
 
 uint32_t result = 0;
 
@@ -334,8 +347,6 @@ int main(int argc, char **argv)
 
   mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_VFR_HUD, mavlink_message_callback);
 
-  // TODO: figure out why message isn`t send back
-
   mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_RADIO_STATUS, mavlink_message_callback);
 
 
@@ -568,6 +579,11 @@ int main(int argc, char **argv)
     memcpy(radio_status_rxerrors_byte, &radio_status_rxerrors_val, sizeof(uint16_t));
     memcpy(radio_status_fixed_byte, &radio_status_fixed_val, sizeof(uint16_t));
 
+    memcpy(flag_result_read_waypoint_byte, &flag_result_read_waypoint, sizeof(bool));
+    memcpy(flag_result_write_waypoint_byte, &flag_result_write_waypoint, sizeof(bool));
+    memcpy(flag_result_read_param_byte, &flag_result_read_param, sizeof(bool));
+    memcpy(flag_result_write_param_byte, &flag_result_write_param, sizeof(bool));
+
     // Set to buf
     packet.data[0] = 0x55; // STX  starting mark Low byte in the front
     packet.data[1] = 0x66; // STX  starting mark Low byte in the front
@@ -685,9 +701,17 @@ int main(int argc, char **argv)
     packet.data[91] = radio_status_fixed_byte[0];
     packet.data[92] = radio_status_fixed_byte[1];
 
+    packet.data[93] = flag_result_read_waypoint_byte[0];
+
+    packet.data[94] = flag_result_write_waypoint_byte[0];
+
+    packet.data[95] = flag_result_read_param_byte[0];
+
+    packet.data[96] = flag_result_write_param_byte[0];
+
     //////////////////////////////////////////////////////////////////////////
-    packet.data[92] = 0x03; 
-    packet.data[93] = 0x07;
+    packet.data[97] = 0x03; 
+    packet.data[98] = 0x07;
 
     // Calc to CRC16
     packet.crc16 = CRC16_cal(packet.data, PACKET_SIZE - 2, *crc16_tab);
@@ -696,66 +720,79 @@ int main(int argc, char **argv)
     packet.data[PACKET_SIZE - 2] = (char)(packet.crc16 & 0xFF);
     packet.data[PACKET_SIZE - 1] = (char)((packet.crc16 >> 8) & 0xFF);
 
-//     switch (flag_read_waypoint)
-//     {
-//     case 1:
-//     {
-//       // todo research::should we use async?
-//       auto waypoints = mission_raw->download_mission();
-//       std::cout << "Downloading mission..." << std::endl;
+    switch (flag_read_waypoint)
+    {
+    case 1:
+    {
+      auto downloaded_waypoints = mission_raw->download_mission();
+      std::cout << "Downloading mission..." << std::endl;
 
-//       auto result_download = waypoints.first;
+      auto result_download = downloaded_waypoints.first;
 
-//       if (result_download != MissionRaw::Result::Success)
-//       {
-//         std::cout << "Mission does not download."
-//                   << " " << result_download << std::endl;
-//       }
+      if (result_download != MissionRaw::Result::Success)
+      {
+        std::cout << "Mission does not download."
+                  << " " << result_download << std::endl;
+      }
 
-//       std::this_thread::sleep_for(std::chrono::seconds(10));
+      std::this_thread::sleep_for(std::chrono::seconds(10));
 
-// #if defined(DEBUG)
-//       for (auto wp : waypoints.second)
-//       {
-//         std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
-//       }
-// #endif
+#if defined(DEBUG)
+      for (auto wp : downloaded_waypoints.second)
+      {
+        std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
+      }
+#endif
 
-//       readWaypoints(waypoints.second, getDestDirPath() + MISSION_WP_FILENAME);
+    std::future<bool> future = std::async(std::launch::async, readWaypointsFromControllerToFile, downloaded_waypoints.second, getDestDirPath() + MISSION_WP_FILENAME);
 
-//       break;
-//     }
-//     default:
-//       break;
-//     }
+    bool result = future.get();
 
-    // switch (flag_write_waypoint)
-    // {
-    // case 1:
-    // {
-    //   std::cout << "Writing waypoints..." << std::endl;
-    //   auto waypoints = writeWaypoints(getDestDirPath() + MISSION_WP_FILENAME);
+    if(result) {
+      flag_result_read_waypoint = 1;
+    }
+    else {
+      std::cout << "Error reading waypoints" << std::endl;
+    }
 
-    //   std::cout << sizeof(waypoints);
-    //   std::this_thread::sleep_for(std::chrono::seconds(10));
+    break;
+    }
 
-    //   auto result_upload = mission_raw->upload_mission(waypoints);
+    default:
+      break;
+    }
 
-    //   if (result_upload != MissionRaw::Result::Success)
-    //   {
-    //     std::cout << "Mission does not upload."
-    //               << " " << result_upload << std::endl;
-    //   }
-    //   else
-    //   {
-    //     std::cout << "Mission uploaded." << std::endl;
-    //   }
+    switch (flag_write_waypoint)
+    {
+    case 1:
+    {
+      std::cout << "Writing waypoints..." << std::endl;
+      std::future<std::vector<MissionRaw::MissionItem>> fut = std::async(std::launch::async, writeWaypointsFromFileToController, (getDestDirPath() + MISSION_WP_FILENAME));
 
-    //   break;
-    // }
-    // default:
-    //   break;
-    // }
+      std::vector<MissionRaw::MissionItem> waypoints = fut.get();
+
+      std::cout << sizeof(waypoints);
+      std::this_thread::sleep_for(std::chrono::seconds(10));
+
+      auto result_upload = mission_raw->upload_mission(waypoints);
+
+      if (result_upload != MissionRaw::Result::Success)
+      {
+        std::cout << "Mission does not upload."
+                  << " " << result_upload << std::endl;
+      }
+      else
+      {
+        std::cout << "Mission uploaded." << std::endl;
+
+        flag_result_write_waypoint = 1;
+      }
+
+      break;
+    }
+    default:
+      break;
+    }
 
     // switch (flag_read_param)
     // {
@@ -892,9 +929,9 @@ int main(int argc, char **argv)
     {
       flag_write_param = 0;
     }
-  }
 
   close(cliSockDes);
 
   return 0;
+}
 }
