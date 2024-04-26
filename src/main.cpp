@@ -28,9 +28,9 @@ using namespace mavsdk;
 
 #define PORT 10000
 
-#define TELEMETRY_PORT "udp://:14550" // 14552
+#define CONNECTION_PORT "udp://:14550" // 14552
 
-#define PACKET_SIZE 93
+#define PACKET_SIZE 101
 
 #define PACKET_SIZE_RX 12
 
@@ -62,8 +62,21 @@ std::string getDestDirPath()
 
 int flag_read_waypoint = 0;
 int flag_write_waypoint = 0;
+
 int flag_read_param = 0;
 int flag_write_param = 0;
+
+bool flag_result_read_waypoint = 0;
+bool flag_result_write_waypoint = 0;
+
+bool flag_result_read_param = 0;
+bool flag_result_write_param = 0;
+
+unsigned char flag_result_read_waypoint_byte[sizeof(flag_read_waypoint)];
+unsigned char flag_result_write_waypoint_byte[sizeof(flag_write_waypoint)];
+
+unsigned char flag_result_read_param_byte[sizeof(flag_read_param)];
+unsigned char flag_result_write_param_byte[sizeof(flag_write_param)];
 
 uint32_t result = 0;
 
@@ -71,7 +84,7 @@ uint8_t crc_buf[] = {0};
 
 char header[] = {0};
 
-#define GPS_MESAGE 0x01
+#define GPS_MESSAGE 0x01
 double gps_lon_val;
 double gps_lat_val;
 float gps_alt_val;
@@ -88,7 +101,7 @@ unsigned char gps_hdop_byte[sizeof(gps_hdop_val)];
 unsigned char gps_vdop_byte[sizeof(gps_vdop_val)];
 unsigned char gps_num_satellites_byte[sizeof(gps_num_satellites_val)];
 
-#define VELOCITY_MESAGE 0x02
+#define VELOCITY_MESSAGE 0x02
 float velocity_north_direction;
 float velocity_east_direction;
 float velocity_down_direction;
@@ -97,12 +110,7 @@ unsigned char velocity_north_byte[sizeof(velocity_north_direction)];
 unsigned char velocity_east_byte[sizeof(velocity_east_direction)];
 unsigned char velocity_down_byte[sizeof(velocity_down_direction)];
 
-#define COMPASS_MESAGE 0x03
-int compass_azimuth_val;
-
-unsigned char compass_azimuth_byte[sizeof(compass_azimuth_val)];
-
-#define IMU_MESAGE 0x04
+#define IMU_MESSAGE 0x03
 float imu_yaw_val;
 float imu_pitch_val;
 float imu_rool_val;
@@ -111,7 +119,7 @@ unsigned char imu_yaw_byte[sizeof(imu_yaw_val)];
 unsigned char imu_pitch_byte[sizeof(imu_pitch_val)];
 unsigned char imu_rool_byte[sizeof(imu_rool_val)];
 
-#define BATTERY_MESAGE 0x05
+#define BATTERY_MESSAGE 0x04
 float batt_voltage;
 float batt_current;
 float batt_charge;
@@ -122,23 +130,44 @@ unsigned char batt_current_byte[sizeof(batt_current)];
 unsigned char batt_charge_byte[sizeof(batt_charge)];
 unsigned char batt_remaining_byte[sizeof(batt_remaining)];
 
-// connection status
-int connection_status_val = 0;
+#define CONNECTION_STATUS 0x05
+int connection_status_val;
 
 unsigned char connection_status_byte[sizeof(connection_status_val)];
 
-// flight mode
-int flight_mode_val = 0;
+#define FLIGHT_MODE 0x06
+int flight_mode_val;
 
 unsigned char flight_mode_byte[sizeof(flight_mode_val)];
 
-// ready to fly
-int ready_to_fly_val = 0;
+#define READY_TO_FLY 0x07
+bool ready_to_fly_val;
 
 unsigned char ready_to_fly_byte[sizeof(ready_to_fly_val)];
 
-struct Packet
-{
+#define COMPASS_MESSAGE 0x08
+int16_t compass_azimuth_val;
+
+unsigned char compass_azimuth_byte[sizeof(compass_azimuth_val)];
+
+#define RADIO_STATUS 0x09
+uint8_t radio_status_rssi_val;
+uint8_t radio_status_remrssi_val;
+uint8_t radio_status_txbuf_val;
+uint8_t radio_status_noise_val;
+uint8_t radio_status_remnoise_val;
+uint16_t radio_status_rxerrors_val;
+uint16_t radio_status_fixed_val;
+
+unsigned char radio_status_rssi_byte[sizeof(radio_status_rssi_val)];
+unsigned char radio_status_remrssi_byte[sizeof(radio_status_remrssi_val)];
+unsigned char radio_status_txbuf_byte[sizeof(radio_status_txbuf_val)];
+unsigned char radio_status_noise_byte[sizeof(radio_status_noise_val)];
+unsigned char radio_status_remnoise_byte[sizeof(radio_status_remnoise_val)];
+unsigned char radio_status_rxerrors_byte[sizeof(radio_status_rxerrors_val)];
+unsigned char radio_status_fixed_byte[sizeof(radio_status_fixed_val)];
+
+struct Packet {
   unsigned char data[PACKET_SIZE];
   uint16_t crc16;
 };
@@ -211,21 +240,43 @@ uint8_t crc_check_16bites(uint8_t *pbuf, uint32_t len, uint32_t *p_result)
   return 2;
 }
 
-void mavlink_message_callback(const mavlink_message_t &msg)
-{
-  switch (msg.msgid)
-  {
-  case MAVLINK_MSG_ID_VFR_HUD:
-  {
-    mavlink_vfr_hud_t vfr_hud;
-    mavlink_msg_vfr_hud_decode(&msg, &vfr_hud);
-    // std::cout << "Azimuth: " << vfr_hud.heading << std::endl;
-    compass_azimuth_val = vfr_hud.heading;
-    break;
-  }
-  }
+void mavlink_message_callback(const mavlink_message_t& msg) {
+    switch(msg.msgid) {
+        case MAVLINK_MSG_ID_VFR_HUD: {
+            mavlink_vfr_hud_t vfr_hud;
+            mavlink_msg_vfr_hud_decode(&msg, &vfr_hud);
 
-  // std::cout << "74 compass" << std::endl;
+            #if defined(DEBUG)
+            std::cout << "Azimuth: " << vfr_hud.heading << std::endl;
+            #endif
+
+            compass_azimuth_val = vfr_hud.heading;
+            break;
+        }
+        case MAVLINK_MSG_ID_RADIO_STATUS: {
+          mavlink_radio_status_t radio_status;
+          mavlink_msg_radio_status_decode(&msg, &radio_status);
+
+          #if defined(DEBUG)
+          std::cout << "RSSI: " << static_cast<unsigned int>(radio_status.rssi) << std::endl;
+          std::cout << "Remote RSSI: " << radio_status.remrssi << std::endl;
+          std::cout << "TX buffer: " << static_cast<unsigned int>(radio_status.txbuf) << std::endl;
+          std::cout << "Noise: " << static_cast<unsigned int>(radio_status.noise) << std::endl;
+          std::cout << "Remote noise: " << static_cast<unsigned int>(radio_status.remnoise) << std::endl;
+          std::cout << "RX errors: " << static_cast<unsigned int>(radio_status.rxerrors) << std::endl;
+          std::cout << "Fixed: " << static_cast<unsigned int>(radio_status.fixed) << std::endl;
+          #endif
+
+          radio_status_rssi_val = radio_status.rssi;
+          radio_status_remrssi_val = radio_status.remrssi;
+          radio_status_txbuf_val = radio_status.txbuf;
+          radio_status_noise_val = radio_status.noise;
+          radio_status_remnoise_val = radio_status.remnoise;
+          radio_status_rxerrors_val = radio_status.rxerrors;
+          radio_status_fixed_val = radio_status.fixed;
+          break;
+        }
+    }
 }
 
 int main(int argc, char **argv)
@@ -251,8 +302,7 @@ int main(int argc, char **argv)
 
   Mavsdk mavsdk{Mavsdk::Configuration{Mavsdk::ComponentType::GroundStation}};
 
-  // auto connection_result = mavsdk.add_any_connection("udp://:14550");
-  auto connection_result = mavsdk.add_any_connection(TELEMETRY_PORT);
+  auto connection_result = mavsdk.add_any_connection(CONNECTION_PORT);
 
   if (connection_result == mavsdk::ConnectionResult::Success)
   {
@@ -267,7 +317,11 @@ int main(int argc, char **argv)
         auto system = mavsdk.systems().back();
 
         if (system->has_autopilot()) {
+
+          #if defined(DEBUG) 
           std::cout << "Discovered Autopilot from Client." << std::endl;
+          #endif
+
           connection_status_val = 1;
 
           mavsdk.unsubscribe_on_new_system(handle);
@@ -289,22 +343,40 @@ int main(int argc, char **argv)
   auto param = std::make_shared<Param>(system);
   auto telemetry = std::make_shared<Telemetry>(system);
   auto mission_raw = std::make_shared<MissionRaw>(system);
-
-  // MavlinkPassthrough mavlink_passthrough(system);
-
   auto mavlink_passthrough = std::make_shared<MavlinkPassthrough>(system);
 
-  mavlink_passthrough->subscribe_message(74, mavlink_message_callback);
+  mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_VFR_HUD, mavlink_message_callback);
 
-  std::cout << "Subscribe message: " << std::endl;
+  mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_RADIO_STATUS, mavlink_message_callback);
+
+
+  // ready to fly
+  bool result_health_all_ok = telemetry->health_all_ok();
+
+  if (result_health_all_ok == 1)
+  {
+    ready_to_fly_val = 1;
+
+    #if defined(DEBUG)
+    std::cout << "Ready to fly" << std::endl;
+    #endif
+  }
+
+  else {
+    #if defined(DEBUG)
+    std::cout << "Not ready to fly " << result_health_all_ok << std::endl;
+    #endif
+  }
 
   // altitude & gps (long, lat)
   telemetry->subscribe_position([](Telemetry::Position position)
                                 {
-    // std::cout << "Altitude & GPS (long, lat)" << std::endl;
-    // std::cout << "Altitude: " << position.absolute_altitude_m
-    //           << " Latitude: " << position.latitude_deg
-    //           << " Longitude: " << position.longitude_deg << std::endl;
+    #if defined(DEBUG)
+    std::cout << "Altitude & GPS (long, lat)" << std::endl;
+    std::cout << "Altitude: " << position.absolute_altitude_m
+              << " Latitude: " << position.latitude_deg
+              << " Longitude: " << position.longitude_deg << std::endl;
+    #endif
 
     gps_alt_val = position.absolute_altitude_m;
     gps_lon_val = position.longitude_deg;
@@ -313,139 +385,111 @@ int main(int argc, char **argv)
   // gps hdop/vdop
   telemetry->subscribe_raw_gps([](Telemetry::RawGps raw_gps)
                                {
-                                //  std::cout << "Gps hdop: " << raw_gps.hdop
-                                //            << "  gps vdop: " << raw_gps.vdop << std::endl;
+    #if defined(DEBUG)
+                                 std::cout << "Gps hdop: " << raw_gps.hdop
+                                           << "  gps vdop: " << raw_gps.vdop << std::endl;
+    #endif
 
                                  gps_hdop_val = raw_gps.hdop;
                                  gps_vdop_val = raw_gps.vdop; });
+    
 
   // gps number of satellites:
   telemetry->subscribe_gps_info([](Telemetry::GpsInfo gps_info)
                                 {
-    // std::cout << "Gps number of satellites: " << gps_info.num_satellites << std::endl;
+    #if defined(DEBUG)
+    std::cout << "Gps number of satellites: " << gps_info.num_satellites << std::endl;
+    #endif
 
     gps_num_satellites_val = gps_info.num_satellites; });
 
   // flight mode
   telemetry->subscribe_flight_mode([](Telemetry::FlightMode flight_mode)
                                    {
-                                     // std::cout << "Flight mode: " << flight_mode << std::endl;
+                                     #if defined(DEBUG)
+                                     std::cout << "Current flight mode: " << flight_mode << std::endl;
+                                     #endif
 
                                      switch (flight_mode)
                                      {
                                      case Telemetry::FlightMode::Acro:
                                        flight_mode_val = static_cast<int>(flight_mode);
-
-                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Altctl:
                                        flight_mode_val = static_cast<int>(flight_mode);
-
-                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::FollowMe:
                                        flight_mode_val = static_cast<int>(flight_mode);
-
-                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Hold:
                                        flight_mode_val = static_cast<int>(flight_mode);
-
-                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Land:
                                        flight_mode_val = static_cast<int>(flight_mode);
-
-                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Manual:
                                        flight_mode_val = static_cast<int>(flight_mode);
-
-                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Mission:
                                        flight_mode_val = static_cast<int>(flight_mode);
-
-                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Offboard:
                                        flight_mode_val = static_cast<int>(flight_mode);
-
-                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Posctl:
                                        flight_mode_val = static_cast<int>(flight_mode);
-
-                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Rattitude:
                                        flight_mode_val = static_cast<int>(flight_mode);
-
-                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Ready:
                                        flight_mode_val = static_cast<int>(flight_mode);
-
-                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::ReturnToLaunch:
                                        flight_mode_val = static_cast<int>(flight_mode);
-
-                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Stabilized:
                                        flight_mode_val = static_cast<int>(flight_mode);
-
-                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Takeoff:
                                        flight_mode_val = static_cast<int>(flight_mode);
-
-                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
 
                                      case Telemetry::FlightMode::Unknown:
                                        flight_mode_val = static_cast<int>(flight_mode);
-
-                                       //  std::cout << static_cast<int>(flight_mode) << std::endl;
                                        break;
                                      }
-
-                                     // std::cout << "Flight mode int: " << flight_mode_val << std::endl;
                                    });
-
-  // ready to fly
-
-  bool result_health_all_ok = telemetry->health_all_ok();
-
-  if (result_health_all_ok == 1)
-  {
-    ready_to_fly_val = 1;
-  }
+  
 
   // velocity
   telemetry->subscribe_velocity_ned([](Telemetry::VelocityNed vel_ned)
                                     {
-    // std::cout << "Velocity" << std::endl;
-    // std::cout << "Velocity along north direction in metres per second: "
-    //           << vel_ned.north_m_s << " "
-    //           << "velocity along east direction in metres per second: "
-    //           << vel_ned.east_m_s << " "
-    //           << "velocity along down direction in metres per second: "
-    //           << vel_ned.down_m_s << std::endl;
+
+     #if defined(DEBUG)
+    
+    std::cout << "Velocity" << std::endl;
+    std::cout << "Velocity along north direction in metres per second: "
+              << vel_ned.north_m_s << " "
+              << "velocity along east direction in metres per second: "
+              << vel_ned.east_m_s << " "
+              << "velocity along down direction in metres per second: "
+              << vel_ned.down_m_s << std::endl;
+
+    #endif
 
     velocity_north_direction = vel_ned.north_m_s;
     velocity_east_direction = vel_ned.east_m_s;
@@ -455,13 +499,15 @@ int main(int argc, char **argv)
   telemetry->subscribe_attitude_angular_velocity_body(
       [](Telemetry::AngularVelocityBody angular_velocity_body)
       {
-        // std::cout << "Roll, pitch, yaw" << std::endl;
-        // std::cout << "Roll angular velocity: "
-        //           << angular_velocity_body.roll_rad_s << std::endl
-        //           << "Pitch angular velocity: "
-        //           << angular_velocity_body.pitch_rad_s << std::endl
-        //           << "Yaw angular velocity: " << angular_velocity_body.yaw_rad_s
-        //           << '\n';
+         #if defined(DEBUG)
+        std::cout << "Roll, pitch, yaw" << std::endl;
+        std::cout << "Roll angular velocity: "
+                  << angular_velocity_body.roll_rad_s << std::endl
+                  << "Pitch angular velocity: "
+                  << angular_velocity_body.pitch_rad_s << std::endl
+                  << "Yaw angular velocity: " << angular_velocity_body.yaw_rad_s
+                  << '\n';
+        #endif
 
         imu_rool_val = angular_velocity_body.roll_rad_s;
         imu_pitch_val = angular_velocity_body.pitch_rad_s;
@@ -471,13 +517,15 @@ int main(int argc, char **argv)
   // battery
   telemetry->subscribe_battery([](Telemetry::Battery battery)
                                {
-    // std::cout << "Battery" << std::endl;
-    // std::cout << "Voltage: " << battery.voltage_v << std::endl
-    //           << "Battery current: " << battery.current_battery_a << std::endl
-    //           << "Consumed charge: " << battery.capacity_consumed_ah
-    //           << std::endl
-    //           << "Estimated battery remaining: " << battery.remaining_percent
-    //           << '\n';
+    #if defined(DEBUG)
+    std::cout << "Battery" << std::endl;
+    std::cout << "Voltage: " << battery.voltage_v << std::endl
+              << "Battery current: " << battery.current_battery_a << std::endl
+              << "Consumed charge: " << battery.capacity_consumed_ah
+              << std::endl
+              << "Estimated battery remaining: " << battery.remaining_percent
+              << '\n';
+    #endif
 
     batt_voltage = battery.voltage_v;
     batt_current = battery.current_battery_a;
@@ -489,37 +537,52 @@ int main(int argc, char **argv)
 
     // Convert float to byte
 
-    // #define GPS_MESAGE 0x01
+    // #define GPS_MESSAGE 0x01
     memcpy(gps_lon_byte, &gps_lon_val, sizeof(double));
     memcpy(gps_lat_byte, &gps_lat_val, sizeof(double));
     memcpy(gps_alt_byte, &gps_alt_val, sizeof(float));
 
-    // #define VELOCITY_MESAGE 0x02
+    // #define VELOCITY_MESSAGE 0x02
     memcpy(velocity_north_byte, &velocity_north_direction, sizeof(float));
     memcpy(velocity_east_byte, &velocity_east_direction, sizeof(float));
     memcpy(velocity_down_byte, &velocity_down_direction, sizeof(float));
 
-    // #define COMPASS_MESAGE 0x03
-    //  int compass_azimuth_val = 128;
-
-    // #define IMU_MESAGE 0x04
+    // #define IMU_MESAGE 0x03
     memcpy(imu_yaw_byte, &imu_yaw_val, sizeof(float));
     memcpy(imu_pitch_byte, &imu_pitch_val, sizeof(float));
     memcpy(imu_rool_byte, &imu_rool_val, sizeof(float));
 
-    // #define BATTERY_MESAGE 0x05
+    // #define BATTERY_MESSAGE 0x04
     memcpy(batt_voltage_byte, &batt_voltage, sizeof(float));
     memcpy(batt_current_byte, &batt_current, sizeof(float));
     memcpy(batt_charge_byte, &batt_charge, sizeof(float));
     memcpy(batt_remaining_byte, &batt_remaining, sizeof(float));
 
+    // #define CONNECTION_STATUS 0x05
     memcpy(connection_status_byte, &connection_status_val, sizeof(int));
 
+    // #define FLIGHT_MODE 0x06
     memcpy(flight_mode_byte, &flight_mode_val, sizeof(int));
 
-    memcpy(ready_to_fly_byte, &ready_to_fly_val, sizeof(int));
+    // #define READY_TO_FLY 0x07
+    memcpy(ready_to_fly_byte, &ready_to_fly_val, sizeof(bool));
 
+    // #define COMPASS_MESSAGE 0x08
     memcpy(compass_azimuth_byte, &compass_azimuth_val, sizeof(int));
+
+    // #define RADIO_STATUS 0x09
+    memcpy(radio_status_rssi_byte, &radio_status_rssi_val, sizeof(uint8_t));
+    memcpy(radio_status_remrssi_byte, &radio_status_remrssi_val, sizeof(uint8_t));
+    memcpy(radio_status_txbuf_byte, &radio_status_txbuf_val, sizeof(uint8_t));
+    memcpy(radio_status_noise_byte, &radio_status_noise_val, sizeof(uint8_t));
+    memcpy(radio_status_remnoise_byte, &radio_status_noise_val, sizeof(uint8_t));
+    memcpy(radio_status_rxerrors_byte, &radio_status_rxerrors_val, sizeof(uint16_t));
+    memcpy(radio_status_fixed_byte, &radio_status_fixed_val, sizeof(uint16_t));
+
+    memcpy(flag_result_read_waypoint_byte, &flag_result_read_waypoint, sizeof(bool));
+    memcpy(flag_result_write_waypoint_byte, &flag_result_write_waypoint, sizeof(bool));
+    memcpy(flag_result_read_param_byte, &flag_result_read_param, sizeof(bool));
+    memcpy(flag_result_write_param_byte, &flag_result_write_param, sizeof(bool));
 
     // Set to buf
     packet.data[0] = 0x55; // STX  starting mark Low byte in the front
@@ -624,18 +687,36 @@ int main(int argc, char **argv)
     packet.data[81] = flight_mode_byte[3];
 
     packet.data[82] = ready_to_fly_byte[0];
-    packet.data[83] = ready_to_fly_byte[1];
-    packet.data[84] = ready_to_fly_byte[2];
-    packet.data[85] = ready_to_fly_byte[3];
 
-    packet.data[86] = compass_azimuth_byte[0];
-    packet.data[87] = compass_azimuth_byte[1];
-    packet.data[88] = compass_azimuth_byte[2];
-    packet.data[89] = compass_azimuth_byte[3];
+    packet.data[83] = compass_azimuth_byte[0];
+    packet.data[84] = compass_azimuth_byte[1];
+
+    packet.data[85] = radio_status_rssi_byte[0];
+    packet.data[86] = radio_status_remrssi_byte[0];
+    packet.data[87] = radio_status_txbuf_byte[0];
+    packet.data[88] = radio_status_noise_byte[0];
+    packet.data[89] = radio_status_remnoise_byte[0];
+    packet.data[90] = radio_status_rxerrors_byte[0];
+    packet.data[90] = radio_status_rxerrors_byte[1];
+    packet.data[91] = radio_status_fixed_byte[0];
+    packet.data[92] = radio_status_fixed_byte[1];
+
+    packet.data[93] = flag_result_read_waypoint_byte[0];
+
+    packet.data[94] = flag_result_write_waypoint_byte[0];
+
+    packet.data[95] = flag_result_read_param_byte[0];
+
+    packet.data[96] = flag_result_write_param_byte[0];
 
     //////////////////////////////////////////////////////////////////////////
+<<<<<<< HEAD
     packet.data[90] = 0x03;
     packet.data[91] = 0x07;
+=======
+    packet.data[97] = 0x03; 
+    packet.data[98] = 0x07;
+>>>>>>> test/telemetry
 
     // Calc to CRC16
     packet.crc16 = CRC16_cal(packet.data, PACKET_SIZE - 2, *crc16_tab);
@@ -648,11 +729,10 @@ int main(int argc, char **argv)
     {
     case 1:
     {
-      // todo research::should we use async?
-      auto waypoints = mission_raw->download_mission();
+      auto downloaded_waypoints = mission_raw->download_mission();
       std::cout << "Downloading mission..." << std::endl;
 
-      auto result_download = waypoints.first;
+      auto result_download = downloaded_waypoints.first;
 
       if (result_download != MissionRaw::Result::Success)
       {
@@ -663,16 +743,26 @@ int main(int argc, char **argv)
       std::this_thread::sleep_for(std::chrono::seconds(10));
 
 #if defined(DEBUG)
-      for (auto wp : waypoints.second)
+      for (auto wp : downloaded_waypoints.second)
       {
         std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
       }
 #endif
 
-      readWaypoints(waypoints.second, getDestDirPath() + MISSION_WP_FILENAME);
+    std::future<bool> future = std::async(std::launch::async, readWaypointsFromControllerToFile, downloaded_waypoints.second, getDestDirPath() + MISSION_WP_FILENAME);
 
-      break;
+    bool result = future.get();
+
+    if(result) {
+      flag_result_read_waypoint = 1;
     }
+    else {
+      std::cout << "Error reading waypoints" << std::endl;
+    }
+
+    break;
+    }
+
     default:
       break;
     }
@@ -682,7 +772,9 @@ int main(int argc, char **argv)
     case 1:
     {
       std::cout << "Writing waypoints..." << std::endl;
-      auto waypoints = writeWaypoints(getDestDirPath() + MISSION_WP_FILENAME);
+      std::future<std::vector<MissionRaw::MissionItem>> fut = std::async(std::launch::async, writeWaypointsFromFileToController, (getDestDirPath() + MISSION_WP_FILENAME));
+
+      std::vector<MissionRaw::MissionItem> waypoints = fut.get();
 
       std::cout << sizeof(waypoints);
       std::this_thread::sleep_for(std::chrono::seconds(10));
@@ -697,6 +789,8 @@ int main(int argc, char **argv)
       else
       {
         std::cout << "Mission uploaded." << std::endl;
+
+        flag_result_write_waypoint = 1;
       }
 
       break;
@@ -705,38 +799,38 @@ int main(int argc, char **argv)
       break;
     }
 
-    switch (flag_read_param)
-    {
-    case 1:
-    {
-      std::cout << "Reading parameters..." << std::endl;
-      auto all_parameters = param->get_all_params();
-      readParams(getDestDirPath() + "file.parm", all_parameters);
-      break;
-    }
-    default:
-      break;
-    }
+    // switch (flag_read_param)
+    // {
+    // case 1:
+    // {
+    //   std::cout << "Reading parameters..." << std::endl;
+    //   auto all_parameters = param->get_all_params();
+    //   readParams(getDestDirPath() + "file.parm", all_parameters);
+    //   break;
+    // }
+    // default:
+    //   break;
+    // }
 
-    switch (flag_write_param)
-    {
-    case 1:
-    {
-      auto parameters = writeParams(getDestDirPath() + "mav.parm");
-      std::cout << "Parameters succesfully written to the file!" << std::endl;
+    // switch (flag_write_param)
+    // {
+    // case 1:
+    // {
+    //   auto parameters = writeParams(getDestDirPath() + "mav.parm");
+    //   std::cout << "Parameters succesfully written to the file!" << std::endl;
 
-      for (auto param_int : parameters.int_params)
-      {
-        param->set_param_int(param_int.name, param_int.value);
-      }
-      for (auto param_float : parameters.float_params)
-      {
-        param->set_param_float(param_float.name, param_float.value);
-      }
-    }
-    default:
-      break;
-    }
+    //   for (auto param_int : parameters.int_params)
+    //   {
+    //     param->set_param_int(param_int.name, param_int.value);
+    //   }
+    //   for (auto param_float : parameters.float_params)
+    //   {
+    //     param->set_param_float(param_float.name, param_float.value);
+    //   }
+    // }
+    // default:
+    //   break;
+    // }
 
     // Send
     if (sendto(cliSockDes, packet.data, sizeof(packet.data), 0,
@@ -840,9 +934,9 @@ int main(int argc, char **argv)
     {
       flag_write_param = 0;
     }
-  }
 
   close(cliSockDes);
 
   return 0;
+}
 }
