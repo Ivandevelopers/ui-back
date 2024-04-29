@@ -9,7 +9,7 @@
 
 #define DEBUG
 
-void readParams(const std::string &filename,
+bool readParamsFromControllerToFile(const std::string &filename,
                 const mavsdk::Param::AllParams &all_params)
 {
   std::ofstream outputFile(filename);
@@ -17,7 +17,7 @@ void readParams(const std::string &filename,
   if (!outputFile.is_open())
   {
     std::cerr << "Unable to open the file for writing: " << filename << std::endl;
-    return;
+    return 0;
   }
 
   for (const auto &float_param : all_params.float_params)
@@ -40,9 +40,11 @@ void readParams(const std::string &filename,
 
   outputFile.close();
   std::cout << "Data successfully written to the file " << filename << '\n';
+
+  return 1;
 }
 
-mavsdk::Param::AllParams writeParams(const std::string &filename)
+mavsdk::Param::AllParams writeParamsToControllerFromFile(const std::string &filename)
 {
   mavsdk::Param::AllParams all_params;
 
