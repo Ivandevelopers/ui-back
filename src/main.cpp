@@ -63,8 +63,10 @@ std::string getDestDirPath()
 int flag_read_waypoint = 0;
 int flag_write_waypoint = 0;
 
-int flag_read_param = 0;
+// int flag_read_param = 0;
 int flag_write_param = 0;
+
+std::atomic<int> flag_read_param{0};
 
 bool flag_result_read_waypoint = 0;
 bool flag_result_write_waypoint = 0;
@@ -167,6 +169,41 @@ unsigned char radio_status_remnoise_byte[sizeof(radio_status_remnoise_val)];
 unsigned char radio_status_rxerrors_byte[sizeof(radio_status_rxerrors_val)];
 unsigned char radio_status_fixed_byte[sizeof(radio_status_fixed_val)];
 
+void getAllParamsAsync(std::shared_ptr<Param> param,
+                       std::function<void(mavsdk::Param::AllParams, std::atomic<int>& flag)> callback, std::atomic<int>& flag)
+{
+
+    int expected = 0;
+    if (!flag.compare_exchange_strong(expected, 1)) { // Atomically set flag to 0 only if it is currently 1
+        std::cout << "Thread creation prevented, previous operation not complete" << std::endl;
+        return;
+    }
+
+  std::thread([param, callback, &flag]()
+              {
+        auto result = param->get_all_params();
+        callback(result, flag);
+         })
+      .detach();
+}
+
+void handleAllParams(const mavsdk::Param::AllParams &params, std::atomic<int>& flag)
+{
+
+  for (const auto &float_param : params.float_params)
+  {
+
+    std::cout << float_param.name << " " << float_param.value << std::endl;
+  }
+
+  for (const auto &int_param : params.int_params)
+  {
+    std::cout << int_param.name << " " << int_param.value << std::endl;
+  }
+
+  flag.store(1);
+}
+
 struct Packet {
   unsigned char data[PACKET_SIZE];
   uint16_t crc16;
@@ -239,40 +276,6 @@ uint8_t crc_check_16bites(uint8_t *pbuf, uint32_t len, uint32_t *p_result)
   *p_result = crc_result;
   return 2;
 }
-
-MissionRaw::MissionItem make_missionRaw_item(
-    uint32_t seq,
-    uint32_t current,
-    uint32_t frame,
-    uint32_t command,
-    float param1,
-    float param2,
-    float param3,
-    float param4,
-    int32_t x,
-    int32_t y,
-    float z,
-    uint32_t autocontinue,
-    uint32_t mission_type
-    )
-{
-    MissionRaw::MissionItem new_item{};
-    new_item.seq = seq;
-    new_item.current = current;
-    new_item.frame = frame;
-    new_item.command = command;
-    new_item.param1 = param1;
-    new_item.param2 = param2;
-    new_item.param3 = param3;
-    new_item.param4 = param4;
-    new_item.x = x;
-    new_item.y = y;
-    new_item.z = z;
-    new_item.autocontinue = autocontinue;
-    new_item.mission_type = mission_type;
-    return new_item;
-}
-
 
 void mavlink_message_callback(const mavlink_message_t& msg) {
     switch(msg.msgid) {
@@ -379,10 +382,9 @@ int main(int argc, char **argv)
   auto mission_raw = std::make_shared<MissionRaw>(system);
   auto mavlink_passthrough = std::make_shared<MavlinkPassthrough>(system);
 
-  //mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_VFR_HUD, mavlink_message_callback);
+  mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_VFR_HUD, mavlink_message_callback);
 
-  //mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_RADIO_STATUS, mavlink_message_callback);
-
+  mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_RADIO_STATUS, mavlink_message_callback);
 
   // ready to fly
   bool result_health_all_ok = telemetry->health_all_ok();
@@ -754,85 +756,73 @@ int main(int argc, char **argv)
     packet.data[PACKET_SIZE - 2] = (char)(packet.crc16 & 0xFF);
     packet.data[PACKET_SIZE - 1] = (char)((packet.crc16 >> 8) & 0xFF);
 
-    switch (flag_read_waypoint)
+    // switch (flag_read_waypoint)
+    // {
+    // case 1:
+    // {
+    //   mission_raw->download_mission_async([](MissionRaw::Result result, std::vector<MissionRaw::MissionItem> items) {
+    //     if (result == MissionRaw::Result::Success) {
+    //         std::cout << "Mission download successful: " << std::endl;
+    //         readWaypointsFromControllerToFile(items, getDestDirPath() + MISSION_WP_FILENAME);
+
+    //         flag_result_read_waypoint = 1;
+    //     } else {
+    //       std::cout << "Error reading waypoints" << std::endl;
+    //     }
+    // });
+
+// #if defined(DEBUG)
+//       for (auto wp : downloaded_waypoints.second)
+//       {
+//         std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
+//       }
+// #endif
+//     break;
+//     }
+
+//     default:
+//       break;
+//     }
+
+// switch (flag_write_waypoint) {
+//     case 1: {
+//         std::cout << "Writing waypoints..." << std::endl;
+
+//         std::async(std::launch::async, [mission_raw]() {
+//             auto destDir = getDestDirPath() + MISSION_WP_FILENAME;
+
+//             auto waypoints = writeWaypointsFromFileToController(destDir);
+
+//             // mission_raw->upload_mission_async(waypoints, [](MissionRaw::Result result) {
+//             //     if (result != MissionRaw::Result::Success) {
+//             //         std::cout << "Mission upload failed. Error code: " << result << std::endl;
+//             //     } else {
+//             //         std::cout << "Mission uploaded successfully." << std::endl;
+//             //     }
+//             // });
+
+//             mission_raw->upload_mission(waypoints);
+//         });
+
+//         break;
+//     }
+// }
+
+//TODO: fix async operation
+
+    switch (flag_read_param)
     {
     case 1:
     {
-      mission_raw->download_mission_async([](MissionRaw::Result result, std::vector<MissionRaw::MissionItem> items) {
-        if (result == MissionRaw::Result::Success) {
-            std::cout << "Mission download successful: " << std::endl;
-            readWaypointsFromControllerToFile(items, getDestDirPath() + MISSION_WP_FILENAME);
-
-            flag_result_read_waypoint = 1;
-        } else {
-          std::cout << "Error reading waypoints" << std::endl;
-        }
-    });
-
-#if defined(DEBUG)
-      for (auto wp : downloaded_waypoints.second)
-      {
-        std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
-      }
-#endif
-    break;
+      getAllParamsAsync(param, handleAllParams, flag_read_param);
+      flag_read_param = 0;
+      break;
     }
-
     default:
       break;
     }
 
-switch (flag_write_waypoint) {
-    case 1: {
-        std::cout << "Writing waypoints..." << std::endl;
-
-        std::async(std::launch::async, [mission_raw]() {
-            auto destDir = getDestDirPath() + MISSION_WP_FILENAME;
-
-            auto waypoints = writeWaypointsFromFileToController(destDir);
-
-            mission_raw->upload_mission_async(waypoints, [](MissionRaw::Result result) {
-                if (result != MissionRaw::Result::Success) {
-                    std::cout << "Mission upload failed. Error code: " << result << std::endl;
-                } else {
-                    std::cout << "Mission uploaded successfully." << std::endl;
-                }
-            });
-        });
-
-        break;
-    }
-}
-
-
-//TODO: add async
-
-//     switch (flag_read_param)
-//     {
-//     case 1:
-//     {
-//       std::cout << "Reading parameters..." << std::endl;
-
-// std::future<Param::AllParams> all_parameters = std::async(std::launch::async, [param]() {
-//     return param->get_all_params();
-// });
-
-//       // auto all_parameters = param->get_all_params();
-//       std::future<bool> future = std::async(readParamsFromControllerToFile, (getDestDirPath() + "file.parm"), all_parameters);
-
-//       bool result = future.get();
-
-//       if(result) {
-//         flag_result_read_param = 1;
-//       } else {
-//         std::cout << "Error reading params from controller" << std::endl;
-//       }
-
-//       break;
-//     }
-//     default:
-//       break;
-//     }
+// TODO: add async
 
     // switch (flag_write_param)
     // {
@@ -863,6 +853,8 @@ switch (flag_write_waypoint) {
       // close(cliSockDes);
       // exit(-1);
     }
+
+    
     // else
     // {
     //   std::cout << "Sending data..." << std::endl;
