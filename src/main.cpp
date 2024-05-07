@@ -793,8 +793,7 @@ int main(int argc, char **argv)
     {
     case 1:
     {
-      getAllParamsAsync(param, handleAllParams, flag_read_param);
-      flag_read_param = 0;
+      // todo
       break;
     }
     default:
