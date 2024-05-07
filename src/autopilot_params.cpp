@@ -51,15 +51,15 @@ bool compareParams(const std::unique_ptr<ParamBase> &param1, const std::unique_p
   return param1->getName() < param2->getName();
 }
 
-void readParams(const std::string &filename,
-                const mavsdk::Param::AllParams &all_params)
+bool readParamsFromControllerToFile(const std::string &filename,
+                                    const mavsdk::Param::AllParams &all_params)
 {
   std::ofstream outputFile(filename);
 
   if (!outputFile.is_open())
   {
     std::cerr << "Unable to open the file for writing: " << filename << std::endl;
-    return;
+    return 0;
   }
 
   // Combine float_params and int_params into a single vector of ParamBase pointers
@@ -87,9 +87,11 @@ void readParams(const std::string &filename,
 
   outputFile.close();
   std::cout << "Data successfully written to the file " << filename << '\n';
+
+  return 1;
 }
 
-mavsdk::Param::AllParams writeParams(const std::string &filename)
+mavsdk::Param::AllParams writeParamsToControllerFromFile(const std::string &filename)
 {
   mavsdk::Param::AllParams all_params;
 
