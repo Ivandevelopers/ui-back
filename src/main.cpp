@@ -24,13 +24,13 @@
 
 using namespace mavsdk;
 
-// #define DEBUG
+#define DEBUG
 
 #define PORT 10000
 
 #define CONNECTION_PORT "udp://:14550" // 14552
 
-#define PACKET_SIZE 101
+#define PACKET_SIZE 105
 
 #define PACKET_SIZE_RX 12
 
@@ -63,10 +63,8 @@ std::string getDestDirPath()
 int flag_read_waypoint = 0;
 int flag_write_waypoint = 0;
 
-// int flag_read_param = 0;
+int flag_read_param = 0;
 int flag_write_param = 0;
-
-std::atomic<int> flag_read_param{0};
 
 bool flag_result_read_waypoint = 0;
 bool flag_result_write_waypoint = 0;
@@ -89,7 +87,8 @@ char header[] = {0};
 #define GPS_MESSAGE 0x01
 double gps_lon_val;
 double gps_lat_val;
-float gps_alt_val;
+float gps_alt_amsl_val;
+float gps_alt_rel_val;
 
 float gps_hdop_val;
 float gps_vdop_val;
@@ -97,7 +96,8 @@ int gps_num_satellites_val;
 
 unsigned char gps_lon_byte[sizeof(gps_lon_val)];
 unsigned char gps_lat_byte[sizeof(gps_lat_val)];
-unsigned char gps_alt_byte[sizeof(gps_alt_val)];
+unsigned char gps_alt_amsl_byte[sizeof(gps_alt_amsl_val)];
+unsigned char gps_alt_rel_byte[sizeof(gps_alt_rel_val)];
 
 unsigned char gps_hdop_byte[sizeof(gps_hdop_val)];
 unsigned char gps_vdop_byte[sizeof(gps_vdop_val)];
@@ -168,41 +168,6 @@ unsigned char radio_status_noise_byte[sizeof(radio_status_noise_val)];
 unsigned char radio_status_remnoise_byte[sizeof(radio_status_remnoise_val)];
 unsigned char radio_status_rxerrors_byte[sizeof(radio_status_rxerrors_val)];
 unsigned char radio_status_fixed_byte[sizeof(radio_status_fixed_val)];
-
-void getAllParamsAsync(std::shared_ptr<Param> param,
-                       std::function<void(mavsdk::Param::AllParams, std::atomic<int>& flag)> callback, std::atomic<int>& flag)
-{
-
-    int expected = 0;
-    if (!flag.compare_exchange_strong(expected, 1)) { // Atomically set flag to 0 only if it is currently 1
-        std::cout << "Thread creation prevented, previous operation not complete" << std::endl;
-        return;
-    }
-
-  std::thread([param, callback, &flag]()
-              {
-        auto result = param->get_all_params();
-        callback(result, flag);
-         })
-      .detach();
-}
-
-void handleAllParams(const mavsdk::Param::AllParams &params, std::atomic<int>& flag)
-{
-
-  for (const auto &float_param : params.float_params)
-  {
-
-    std::cout << float_param.name << " " << float_param.value << std::endl;
-  }
-
-  for (const auto &int_param : params.int_params)
-  {
-    std::cout << int_param.name << " " << int_param.value << std::endl;
-  }
-
-  flag.store(1);
-}
 
 struct Packet {
   unsigned char data[PACKET_SIZE];
@@ -334,48 +299,47 @@ int main(int argc, char **argv)
   // server socket address
   serAddr.sin_family = AF_INET;
   serAddr.sin_port = htons(PORT);
-
   serAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-  Mavsdk mavsdk{Mavsdk::Configuration{Mavsdk::ComponentType::GroundStation}};
+  Mavsdk::Configuration config(Mavsdk::ComponentType::GroundStation);
 
-  auto connection_result = mavsdk.add_any_connection(CONNECTION_PORT);
-
-  if (connection_result == mavsdk::ConnectionResult::Success)
-  {
-    std::cout << "Connected!" << std::endl;
-  }
+  auto mavsdk = std::make_unique<Mavsdk>(config);
 
   auto prom = std::promise<std::shared_ptr<System>>{};
   auto fut = prom.get_future();
   Mavsdk::NewSystemHandle handle =
-      mavsdk.subscribe_on_new_system([&mavsdk, &prom, &handle]()
+      mavsdk->subscribe_on_new_system([&mavsdk, &prom, &handle]()
                                      {
-        auto system = mavsdk.systems().back();
+        auto system = mavsdk->systems().at(0);
 
-        if (system->has_autopilot()) {
+        if (system->is_connected()) {
 
           #if defined(DEBUG) 
-          std::cout << "Discovered Autopilot from Client." << std::endl;
+          std::cout << "System is connected!" << std::endl;
           #endif
 
           connection_status_val = 1;
 
-          mavsdk.unsubscribe_on_new_system(handle);
+          mavsdk->unsubscribe_on_new_system(handle);
           prom.set_value(system);
         } else {
-          std::cout << "No MAVSDK found." << std::endl;
+
+          #if defined(DEBUG)
+          std::cout << "System is not connected!" << std::endl;
+          #endif
+
+          // connection_status_val = 0;
         } });
 
-  if (fut.wait_for(std::chrono::seconds(10)) == std::future_status::timeout)
-  {
-    std::cout << "No autopilot found, exiting." << std::endl;
-    return 1;
-  }
-
-  std::this_thread::sleep_for(std::chrono::seconds(10));
+  auto connection_result = mavsdk->add_any_connection(CONNECTION_PORT); 
 
   auto system = fut.get();
+
+  if(connection_result == ConnectionResult::Success) {
+    std::cout << "System connected" << std::endl;
+  } else {
+    std::cout << "System disconnected" << std::endl;
+  }
 
   auto param = std::make_shared<Param>(system);
   auto telemetry = std::make_shared<Telemetry>(system);
@@ -385,6 +349,20 @@ int main(int argc, char **argv)
   mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_VFR_HUD, mavlink_message_callback);
 
   mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_RADIO_STATUS, mavlink_message_callback);
+
+  system->subscribe_is_connected([](bool is_connected) {
+    if(!is_connected) {
+      #if defined(DEBUG)
+      std::cout << "System is not connected subscribe" << std::endl;
+      #endif
+
+      connection_status_val = 0;
+    } else {
+      #if defined(DEBUG)
+      std::cout << "System is connected subscribe" << std::endl;
+      #endif
+    }
+  });
 
   // ready to fly
   bool result_health_all_ok = telemetry->health_all_ok();
@@ -399,6 +377,8 @@ int main(int argc, char **argv)
   }
 
   else {
+
+    ready_to_fly_val = 0;
     #if defined(DEBUG)
     std::cout << "Not ready to fly " << result_health_all_ok << std::endl;
     #endif
@@ -409,12 +389,14 @@ int main(int argc, char **argv)
                                 {
     #if defined(DEBUG)
     std::cout << "Altitude & GPS (long, lat)" << std::endl;
-    std::cout << "Altitude: " << position.absolute_altitude_m
+    std::cout << "Altitude AMSL (above mean sea level) in metres: " << position.absolute_altitude_m
+              << " Altitude relative to takeoff altitude in metres: " << position.relative_altitude_m
               << " Latitude: " << position.latitude_deg
               << " Longitude: " << position.longitude_deg << std::endl;
     #endif
 
-    gps_alt_val = position.absolute_altitude_m;
+    gps_alt_amsl_val = position.absolute_altitude_m;
+    gps_alt_rel_val = position.relative_altitude_m;
     gps_lon_val = position.longitude_deg;
     gps_lat_val = position.latitude_deg; });
 
@@ -570,13 +552,13 @@ int main(int argc, char **argv)
 
   while (1)
   {
-
     // Convert float to byte
 
     // #define GPS_MESSAGE 0x01
     memcpy(gps_lon_byte, &gps_lon_val, sizeof(double));
     memcpy(gps_lat_byte, &gps_lat_val, sizeof(double));
-    memcpy(gps_alt_byte, &gps_alt_val, sizeof(float));
+    memcpy(gps_alt_amsl_byte, &gps_alt_amsl_val, sizeof(float));
+    memcpy(gps_alt_rel_byte, &gps_alt_rel_val, sizeof(float));
 
     // #define VELOCITY_MESSAGE 0x02
     memcpy(velocity_north_byte, &velocity_north_direction, sizeof(float));
@@ -642,112 +624,120 @@ int main(int argc, char **argv)
     packet.data[16] = gps_lat_byte[6];
     packet.data[17] = gps_lat_byte[7];
 
-    packet.data[18] = gps_alt_byte[0];
-    packet.data[19] = gps_alt_byte[1];
-    packet.data[20] = gps_alt_byte[2];
-    packet.data[21] = gps_alt_byte[3];
+    packet.data[18] = gps_alt_amsl_byte[0];
+    packet.data[19] = gps_alt_amsl_byte[1];
+    packet.data[20] = gps_alt_amsl_byte[2];
+    packet.data[21] = gps_alt_amsl_byte[3];
 
-    packet.data[22] = gps_hdop_byte[0];
-    packet.data[23] = gps_hdop_byte[1];
-    packet.data[24] = gps_hdop_byte[2];
-    packet.data[25] = gps_hdop_byte[3];
+    packet.data[22] = gps_alt_rel_byte[0];
+    packet.data[23] = gps_alt_rel_byte[1];
+    packet.data[24] = gps_alt_rel_byte[2];
+    packet.data[25] = gps_alt_rel_byte[3];
 
-    packet.data[26] = gps_vdop_byte[0];
-    packet.data[27] = gps_vdop_byte[1];
-    packet.data[28] = gps_vdop_byte[2];
-    packet.data[29] = gps_vdop_byte[3];
+    packet.data[26] = gps_hdop_byte[0];
+    packet.data[27] = gps_hdop_byte[1];
+    packet.data[28] = gps_hdop_byte[2];
+    packet.data[29] = gps_hdop_byte[3];
 
-    packet.data[30] = gps_num_satellites_byte[0];
-    packet.data[31] = gps_num_satellites_byte[1];
-    packet.data[32] = gps_num_satellites_byte[2];
-    packet.data[33] = gps_num_satellites_byte[3];
+    packet.data[30] = gps_vdop_byte[0];
+    packet.data[31] = gps_vdop_byte[1];
+    packet.data[32] = gps_vdop_byte[2];
+    packet.data[33] = gps_vdop_byte[3];
+
+    packet.data[34] = gps_num_satellites_byte[0];
+    packet.data[35] = gps_num_satellites_byte[1];
+    packet.data[36] = gps_num_satellites_byte[2];
+    packet.data[37] = gps_num_satellites_byte[3];
     //////////////////////////////////////////////////////////////////////////
-    packet.data[34] = velocity_north_byte[0];
-    packet.data[35] = velocity_north_byte[1];
-    packet.data[36] = velocity_north_byte[2];
-    packet.data[37] = velocity_north_byte[3];
+    packet.data[38] = velocity_north_byte[0];
+    packet.data[39] = velocity_north_byte[1];
+    packet.data[40] = velocity_north_byte[2];
+    packet.data[41] = velocity_north_byte[3];
 
-    packet.data[38] = velocity_east_byte[0];
-    packet.data[39] = velocity_east_byte[1];
-    packet.data[40] = velocity_east_byte[2];
-    packet.data[41] = velocity_east_byte[3];
+    packet.data[42] = velocity_east_byte[0];
+    packet.data[43] = velocity_east_byte[1];
+    packet.data[44] = velocity_east_byte[2];
+    packet.data[45] = velocity_east_byte[3];
 
-    packet.data[42] = velocity_down_byte[0];
-    packet.data[43] = velocity_down_byte[1];
-    packet.data[44] = velocity_down_byte[2];
-    packet.data[45] = velocity_down_byte[3];
+    packet.data[46] = velocity_down_byte[0];
+    packet.data[47] = velocity_down_byte[1];
+    packet.data[48] = velocity_down_byte[2];
+    packet.data[49] = velocity_down_byte[3];
     //////////////////////////////////////////////////////////////////////////
-    packet.data[46] = imu_yaw_byte[0];
-    packet.data[47] = imu_yaw_byte[1];
-    packet.data[48] = imu_yaw_byte[2];
-    packet.data[49] = imu_yaw_byte[3];
+    packet.data[50] = imu_yaw_byte[0];
+    packet.data[51] = imu_yaw_byte[1];
+    packet.data[52] = imu_yaw_byte[2];
+    packet.data[53] = imu_yaw_byte[3];
 
-    packet.data[50] = imu_pitch_byte[0];
-    packet.data[51] = imu_pitch_byte[1];
-    packet.data[52] = imu_pitch_byte[2];
-    packet.data[53] = imu_pitch_byte[3];
+    packet.data[54] = imu_pitch_byte[0];
+    packet.data[55] = imu_pitch_byte[1];
+    packet.data[56] = imu_pitch_byte[2];
+    packet.data[57] = imu_pitch_byte[3];
 
-    packet.data[54] = imu_rool_byte[0];
-    packet.data[55] = imu_rool_byte[1];
-    packet.data[56] = imu_rool_byte[2];
-    packet.data[57] = imu_rool_byte[3];
+    packet.data[58] = imu_rool_byte[0];
+    packet.data[59] = imu_rool_byte[1];
+    packet.data[60] = imu_rool_byte[2];
+    packet.data[61] = imu_rool_byte[3];
     //////////////////////////////////////////////////////////////////////////
-    packet.data[58] = batt_voltage_byte[0];
-    packet.data[59] = batt_voltage_byte[1];
-    packet.data[60] = batt_voltage_byte[2];
-    packet.data[61] = batt_voltage_byte[3];
+    packet.data[62] = batt_voltage_byte[0];
+    packet.data[63] = batt_voltage_byte[1];
+    packet.data[64] = batt_voltage_byte[2];
+    packet.data[65] = batt_voltage_byte[3];
 
-    packet.data[62] = batt_current_byte[0];
-    packet.data[63] = batt_current_byte[1];
-    packet.data[64] = batt_current_byte[2];
-    packet.data[65] = batt_current_byte[3];
+    packet.data[66] = batt_current_byte[0];
+    packet.data[67] = batt_current_byte[1];
+    packet.data[68] = batt_current_byte[2];
+    packet.data[69] = batt_current_byte[3];
 
-    packet.data[66] = batt_charge_byte[0];
-    packet.data[67] = batt_charge_byte[1];
-    packet.data[68] = batt_charge_byte[2];
-    packet.data[69] = batt_charge_byte[3];
+    packet.data[70] = batt_charge_byte[0];
+    packet.data[71] = batt_charge_byte[1];
+    packet.data[72] = batt_charge_byte[2];
+    packet.data[73] = batt_charge_byte[3];
 
-    packet.data[70] = batt_remaining_byte[0];
-    packet.data[71] = batt_remaining_byte[1];
-    packet.data[72] = batt_remaining_byte[2];
-    packet.data[73] = batt_remaining_byte[3];
+    packet.data[74] = batt_remaining_byte[0];
+    packet.data[75] = batt_remaining_byte[1];
+    packet.data[76] = batt_remaining_byte[2];
+    packet.data[77] = batt_remaining_byte[3];
 
-    packet.data[74] = connection_status_byte[0];
-    packet.data[75] = connection_status_byte[1];
-    packet.data[76] = connection_status_byte[2];
-    packet.data[77] = connection_status_byte[3];
+    packet.data[78] = connection_status_byte[0];
+    packet.data[79] = connection_status_byte[1];
+    packet.data[80] = connection_status_byte[2];
+    packet.data[81] = connection_status_byte[3];
 
-    packet.data[78] = flight_mode_byte[0];
-    packet.data[79] = flight_mode_byte[1];
-    packet.data[80] = flight_mode_byte[2];
-    packet.data[81] = flight_mode_byte[3];
+    packet.data[82] = flight_mode_byte[0];
+    packet.data[83] = flight_mode_byte[1];
+    packet.data[84] = flight_mode_byte[2];
+    packet.data[85] = flight_mode_byte[3];
 
-    packet.data[82] = ready_to_fly_byte[0];
+    packet.data[86] = ready_to_fly_byte[0];
 
-    packet.data[83] = compass_azimuth_byte[0];
-    packet.data[84] = compass_azimuth_byte[1];
+    packet.data[87] = compass_azimuth_byte[0];
+    packet.data[88] = compass_azimuth_byte[1];
 
-    packet.data[85] = radio_status_rssi_byte[0];
-    packet.data[86] = radio_status_remrssi_byte[0];
-    packet.data[87] = radio_status_txbuf_byte[0];
-    packet.data[88] = radio_status_noise_byte[0];
-    packet.data[89] = radio_status_remnoise_byte[0];
-    packet.data[90] = radio_status_rxerrors_byte[0];
-    packet.data[90] = radio_status_rxerrors_byte[1];
-    packet.data[91] = radio_status_fixed_byte[0];
-    packet.data[92] = radio_status_fixed_byte[1];
+    packet.data[89] = radio_status_rssi_byte[0];
+    packet.data[90] = radio_status_remrssi_byte[0];
+    packet.data[91] = radio_status_txbuf_byte[0];
+    packet.data[92] = radio_status_noise_byte[0];
 
-    packet.data[93] = flag_result_read_waypoint_byte[0];
+    packet.data[93] = radio_status_remnoise_byte[0];
 
-    packet.data[94] = flag_result_write_waypoint_byte[0];
+    packet.data[94] = radio_status_rxerrors_byte[0];
+    packet.data[95] = radio_status_rxerrors_byte[1];
 
-    packet.data[95] = flag_result_read_param_byte[0];
+    packet.data[96] = radio_status_fixed_byte[0];
+    packet.data[97] = radio_status_fixed_byte[1];
 
-    packet.data[96] = flag_result_write_param_byte[0];
+    packet.data[98] = flag_result_read_waypoint_byte[0];
+
+    packet.data[99] = flag_result_write_waypoint_byte[0];
+
+    packet.data[100] = flag_result_read_param_byte[0];
+
+    packet.data[101] = flag_result_write_param_byte[0];
 
     //////////////////////////////////////////////////////////////////////////
-    packet.data[97] = 0x03; 
-    packet.data[98] = 0x07;
+    packet.data[102] = 0x03; 
+    packet.data[103] = 0x07;
 
     // Calc to CRC16
     packet.crc16 = CRC16_cal(packet.data, PACKET_SIZE - 2, *crc16_tab);
@@ -756,27 +746,27 @@ int main(int argc, char **argv)
     packet.data[PACKET_SIZE - 2] = (char)(packet.crc16 & 0xFF);
     packet.data[PACKET_SIZE - 1] = (char)((packet.crc16 >> 8) & 0xFF);
 
-    // switch (flag_read_waypoint)
-    // {
-    // case 1:
-    // {
-    //   mission_raw->download_mission_async([](MissionRaw::Result result, std::vector<MissionRaw::MissionItem> items) {
-    //     if (result == MissionRaw::Result::Success) {
-    //         std::cout << "Mission download successful: " << std::endl;
-    //         readWaypointsFromControllerToFile(items, getDestDirPath() + MISSION_WP_FILENAME);
+//     switch (flag_read_waypoint)
+//     {
+//     case 1:
+//     {
+//       mission_raw->download_mission_async([](MissionRaw::Result result, std::vector<MissionRaw::MissionItem> items) {
+//         if (result == MissionRaw::Result::Success) {
+//             std::cout << "Mission download successful: " << std::endl;
+//             readWaypointsFromControllerToFile(items, getDestDirPath() + MISSION_WP_FILENAME);
 
-    //         flag_result_read_waypoint = 1;
-    //     } else {
-    //       std::cout << "Error reading waypoints" << std::endl;
-    //     }
-    // });
+//             flag_result_read_waypoint = 1;
+//         } else {
+//           std::cout << "Error reading waypoints" << std::endl;
+//         }
+//     });
 
-// #if defined(DEBUG)
-//       for (auto wp : downloaded_waypoints.second)
-//       {
-//         std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
-//       }
-// #endif
+// // #if defined(DEBUG)
+// //       for (auto wp : downloaded_waypoints.second)
+// //       {
+// //         std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
+// //       }
+// // #endif
 //     break;
 //     }
 
@@ -793,57 +783,18 @@ int main(int argc, char **argv)
 
 //             auto waypoints = writeWaypointsFromFileToController(destDir);
 
-//             // mission_raw->upload_mission_async(waypoints, [](MissionRaw::Result result) {
-//             //     if (result != MissionRaw::Result::Success) {
-//             //         std::cout << "Mission upload failed. Error code: " << result << std::endl;
-//             //     } else {
-//             //         std::cout << "Mission uploaded successfully." << std::endl;
-//             //     }
-//             // });
-
-//             mission_raw->upload_mission(waypoints);
+//             mission_raw->upload_mission_async(waypoints, [](MissionRaw::Result result) {
+//                 if (result != MissionRaw::Result::Success) {
+//                     std::cout << "Mission upload failed. Error code: " << result << std::endl;
+//                 } else {
+//                     std::cout << "Mission uploaded successfully." << std::endl;
+//                 }
+//             });
 //         });
 
 //         break;
 //     }
 // }
-
-//TODO: fix async operation
-
-    switch (flag_read_param)
-    {
-    case 1:
-    {
-      getAllParamsAsync(param, handleAllParams, flag_read_param);
-      flag_read_param = 0;
-      break;
-    }
-    default:
-      break;
-    }
-
-// TODO: add async
-
-    // switch (flag_write_param)
-    // {
-    // case 1:
-    // {
-    //   std::future<mavsdk::Param::AllParams> future = std::async(writeParamsFromFileToController, (getDestDirPath() + "mav.parm"));
-
-    //   mavsdk::Param::AllParams parameters = future.get();
-      
-    //   for (auto param_int : parameters.int_params)
-    //   {
-    //     param->set_param_int(param_int.name, param_int.value);
-    //   }
-    //   for (auto param_float : parameters.float_params)
-    //   {
-    //     param->set_param_float(param_float.name, param_float.value);
-    //   }
-    // }
-    // default:
-    //   break;
-    // }
 
     // Send
     if (sendto(cliSockDes, packet.data, sizeof(packet.data), 0,
