@@ -22,13 +22,16 @@
 #include "autopilot_mission.h"
 #include "autopilot_params.h"
 
+// #include <functional>
+#include <mavsdk/plugins/ftp/ftp.h>
+
 using namespace mavsdk;
 
 // #define DEBUG
 
 #define PORT 10000
 
-#define TELEMETRY_PORT "udp://:14550" // 14552
+#define TELEMETRY_PORT "udp://:14550" // 14552 // 14550
 
 #define PACKET_SIZE 93
 
@@ -228,6 +231,8 @@ void mavlink_message_callback(const mavlink_message_t &msg)
   // std::cout << "74 compass" << std::endl;
 }
 
+struct timeval tv;
+
 int main(int argc, char **argv)
 {
   int cliSockDes, readStatus;
@@ -249,9 +254,12 @@ int main(int argc, char **argv)
 
   serAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
+  tv.tv_sec = 3;
+  tv.tv_usec = 0;
+  setsockopt(cliSockDes, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(struct timeval));
+
   Mavsdk mavsdk{Mavsdk::Configuration{Mavsdk::ComponentType::GroundStation}};
 
-  // auto connection_result = mavsdk.add_any_connection("udp://:14550");
   auto connection_result = mavsdk.add_any_connection(TELEMETRY_PORT);
 
   if (connection_result == mavsdk::ConnectionResult::Success)
@@ -290,8 +298,6 @@ int main(int argc, char **argv)
   auto telemetry = std::make_shared<Telemetry>(system);
   auto mission_raw = std::make_shared<MissionRaw>(system);
 
-  // MavlinkPassthrough mavlink_passthrough(system);
-
   auto mavlink_passthrough = std::make_shared<MavlinkPassthrough>(system);
 
   mavlink_passthrough->subscribe_message(74, mavlink_message_callback);
@@ -305,7 +311,7 @@ int main(int argc, char **argv)
     // std::cout << "Altitude: " << position.absolute_altitude_m
     //           << " Latitude: " << position.latitude_deg
     //           << " Longitude: " << position.longitude_deg << std::endl;
-
+    
     gps_alt_val = position.absolute_altitude_m;
     gps_lon_val = position.longitude_deg;
     gps_lat_val = position.latitude_deg; });
@@ -313,17 +319,17 @@ int main(int argc, char **argv)
   // gps hdop/vdop
   telemetry->subscribe_raw_gps([](Telemetry::RawGps raw_gps)
                                {
-                                //  std::cout << "Gps hdop: " << raw_gps.hdop
-                                //            << "  gps vdop: " << raw_gps.vdop << std::endl;
+    //  std::cout << "Gps hdop: " << raw_gps.hdop
+    //            << "  gps vdop: " << raw_gps.vdop << std::endl;
 
-                                 gps_hdop_val = raw_gps.hdop;
-                                 gps_vdop_val = raw_gps.vdop; });
+    gps_hdop_val = raw_gps.hdop;
+    gps_vdop_val = raw_gps.vdop; });
 
   // gps number of satellites:
   telemetry->subscribe_gps_info([](Telemetry::GpsInfo gps_info)
                                 {
     // std::cout << "Gps number of satellites: " << gps_info.num_satellites << std::endl;
-
+    
     gps_num_satellites_val = gps_info.num_satellites; });
 
   // flight mode
@@ -723,7 +729,7 @@ int main(int argc, char **argv)
     case 1:
     {
       auto parameters = writeParams(getDestDirPath() + "mav.parm");
-      std::cout << "Parameters succesfully written to the file!" << std::endl;
+      std::cout << "Parameters successfully written to the file!" << std::endl;
 
       for (auto param_int : parameters.int_params)
       {
@@ -746,10 +752,6 @@ int main(int argc, char **argv)
       // close(cliSockDes);
       // exit(-1);
     }
-    // else
-    // {
-    //   std::cout << "Sending data..." << std::endl;
-    // }
 
     // Read
     serAddrLen = sizeof(serAddr);
