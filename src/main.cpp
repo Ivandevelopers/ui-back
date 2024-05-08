@@ -115,11 +115,11 @@ unsigned char velocity_down_byte[sizeof(velocity_down_direction)];
 #define IMU_MESSAGE 0x03
 float imu_yaw_val;
 float imu_pitch_val;
-float imu_rool_val;
+float imu_roll_val;
 
 unsigned char imu_yaw_byte[sizeof(imu_yaw_val)];
 unsigned char imu_pitch_byte[sizeof(imu_pitch_val)];
-unsigned char imu_rool_byte[sizeof(imu_rool_val)];
+unsigned char imu_roll_byte[sizeof(imu_roll_val)];
 
 #define BATTERY_MESSAGE 0x04
 float batt_voltage;
@@ -249,7 +249,7 @@ void mavlink_message_callback(const mavlink_message_t& msg) {
             mavlink_msg_vfr_hud_decode(&msg, &vfr_hud);
 
             #if defined(DEBUG)
-            std::cout << "Azimuth: " << vfr_hud.heading << std::endl;
+            std::cout << "Heading: " << vfr_hud.heading << std::endl;
             #endif
 
             compass_azimuth_val = vfr_hud.heading;
@@ -278,6 +278,22 @@ void mavlink_message_callback(const mavlink_message_t& msg) {
           radio_status_fixed_val = radio_status.fixed;
           break;
         }
+
+        case MAVLINK_MSG_ID_ATTITUDE: {
+          mavlink_attitude_t attitude;
+          mavlink_msg_attitude_decode(&msg, &attitude);
+
+          #if defined(DEBUG)
+          std::cout << "Roll attitude: " << attitude.roll << std::endl;
+          std::cout << "Pitch attitude: " << attitude.pitch << std::endl;
+          std::cout << "Yaw attitude: " << attitude.yaw << std::endl;
+          #endif
+
+        imu_roll_val = attitude.roll;
+        imu_pitch_val = attitude.pitch;
+        imu_yaw_val = attitude.yaw;
+        }
+
     }
 }
 
@@ -346,9 +362,14 @@ int main(int argc, char **argv)
   auto mission_raw = std::make_shared<MissionRaw>(system);
   auto mavlink_passthrough = std::make_shared<MavlinkPassthrough>(system);
 
+  // heading
   mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_VFR_HUD, mavlink_message_callback);
 
+  // rssi
   mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_RADIO_STATUS, mavlink_message_callback);
+
+  // roll, pitch & yaw
+  mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_ATTITUDE, mavlink_message_callback);
 
   system->subscribe_is_connected([](bool is_connected) {
     if(!is_connected) {
@@ -383,6 +404,13 @@ int main(int argc, char **argv)
     std::cout << "Not ready to fly " << result_health_all_ok << std::endl;
     #endif
   }
+
+  telemetry->subscribe_health([](Telemetry::Health health) {
+    std::cout << "Is accelerometer ok: " << health.is_accelerometer_calibration_ok << std::endl;
+    std::cout << "Is gyrometer ok: " << health.is_gyrometer_calibration_ok << std::endl;
+    std::cout << "Is magnetometer ok: " << health.is_magnetometer_calibration_ok << std::endl;
+
+  });
 
   // altitude & gps (long, lat)
   telemetry->subscribe_position([](Telemetry::Position position)
@@ -513,25 +541,6 @@ int main(int argc, char **argv)
     velocity_east_direction = vel_ned.east_m_s;
     velocity_down_direction = vel_ned.down_m_s; });
 
-  // roll, pitch & yaw
-  telemetry->subscribe_attitude_angular_velocity_body(
-      [](Telemetry::AngularVelocityBody angular_velocity_body)
-      {
-         #if defined(DEBUG)
-        std::cout << "Roll, pitch, yaw" << std::endl;
-        std::cout << "Roll angular velocity: "
-                  << angular_velocity_body.roll_rad_s << std::endl
-                  << "Pitch angular velocity: "
-                  << angular_velocity_body.pitch_rad_s << std::endl
-                  << "Yaw angular velocity: " << angular_velocity_body.yaw_rad_s
-                  << '\n';
-        #endif
-
-        imu_rool_val = angular_velocity_body.roll_rad_s;
-        imu_pitch_val = angular_velocity_body.pitch_rad_s;
-        imu_yaw_val = angular_velocity_body.yaw_rad_s;
-      });
-
   // battery
   telemetry->subscribe_battery([](Telemetry::Battery battery)
                                {
@@ -568,7 +577,7 @@ int main(int argc, char **argv)
     // #define IMU_MESAGE 0x03
     memcpy(imu_yaw_byte, &imu_yaw_val, sizeof(float));
     memcpy(imu_pitch_byte, &imu_pitch_val, sizeof(float));
-    memcpy(imu_rool_byte, &imu_rool_val, sizeof(float));
+    memcpy(imu_roll_byte, &imu_roll_val, sizeof(float));
 
     // #define BATTERY_MESSAGE 0x04
     memcpy(batt_voltage_byte, &batt_voltage, sizeof(float));
@@ -586,7 +595,7 @@ int main(int argc, char **argv)
     memcpy(ready_to_fly_byte, &ready_to_fly_val, sizeof(bool));
 
     // #define COMPASS_MESSAGE 0x08
-    memcpy(compass_azimuth_byte, &compass_azimuth_val, sizeof(int));
+    memcpy(compass_azimuth_byte, &compass_azimuth_val, sizeof(int16_t));
 
     // #define RADIO_STATUS 0x09
     memcpy(radio_status_rssi_byte, &radio_status_rssi_val, sizeof(uint8_t));
@@ -674,10 +683,10 @@ int main(int argc, char **argv)
     packet.data[56] = imu_pitch_byte[2];
     packet.data[57] = imu_pitch_byte[3];
 
-    packet.data[58] = imu_rool_byte[0];
-    packet.data[59] = imu_rool_byte[1];
-    packet.data[60] = imu_rool_byte[2];
-    packet.data[61] = imu_rool_byte[3];
+    packet.data[58] = imu_roll_byte[0];
+    packet.data[59] = imu_roll_byte[1];
+    packet.data[60] = imu_roll_byte[2];
+    packet.data[61] = imu_roll_byte[3];
     //////////////////////////////////////////////////////////////////////////
     packet.data[62] = batt_voltage_byte[0];
     packet.data[63] = batt_voltage_byte[1];
@@ -746,55 +755,56 @@ int main(int argc, char **argv)
     packet.data[PACKET_SIZE - 2] = (char)(packet.crc16 & 0xFF);
     packet.data[PACKET_SIZE - 1] = (char)((packet.crc16 >> 8) & 0xFF);
 
-//     switch (flag_read_waypoint)
-//     {
-//     case 1:
-//     {
-//       mission_raw->download_mission_async([](MissionRaw::Result result, std::vector<MissionRaw::MissionItem> items) {
-//         if (result == MissionRaw::Result::Success) {
-//             std::cout << "Mission download successful: " << std::endl;
-//             readWaypointsFromControllerToFile(items, getDestDirPath() + MISSION_WP_FILENAME);
+    switch (flag_read_waypoint)
+    {
+    case 1:
+    {
+      mission_raw->download_mission_async([](MissionRaw::Result result, std::vector<MissionRaw::MissionItem> items) {
+        if (result == MissionRaw::Result::Success) {
+            std::cout << "Mission download successful: " << std::endl;
+            readWaypointsFromControllerToFile(items, getDestDirPath() + MISSION_WP_FILENAME);
 
-//             flag_result_read_waypoint = 1;
-//         } else {
-//           std::cout << "Error reading waypoints" << std::endl;
-//         }
-//     });
+            flag_result_read_waypoint = 1;
+        } else {
+          std::cout << "Error reading waypoints" << std::endl;
+        }
+    });
 
-// // #if defined(DEBUG)
-// //       for (auto wp : downloaded_waypoints.second)
-// //       {
-// //         std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
-// //       }
-// // #endif
-//     break;
-//     }
+// #if defined(DEBUG)
+//       for (auto wp : downloaded_waypoints.second)
+//       {
+//         std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
+//       }
+// #endif
+    break;
+    }
 
-//     default:
-//       break;
-//     }
+    default:
+      break;
+    }
 
-// switch (flag_write_waypoint) {
-//     case 1: {
-//         std::cout << "Writing waypoints..." << std::endl;
+switch (flag_write_waypoint) {
+    case 1: {
+        std::cout << "Writing waypoints..." << std::endl;
 
-//         std::async(std::launch::async, [mission_raw]() {
-//             auto destDir = getDestDirPath() + MISSION_WP_FILENAME;
+        auto destDir = getDestDirPath() + MISSION_WP_FILENAME;
 
-//             auto waypoints = writeWaypointsFromFileToController(destDir);
+        std::thread([mission_raw, destDir]() {
 
-//             mission_raw->upload_mission_async(waypoints, [](MissionRaw::Result result) {
-//                 if (result != MissionRaw::Result::Success) {
-//                     std::cout << "Mission upload failed. Error code: " << result << std::endl;
-//                 } else {
-//                     std::cout << "Mission uploaded successfully." << std::endl;
-//                 }
-//             });
-//         });
+            auto waypoints = writeWaypointsFromFileToController(destDir);
 
-//         break;
-//     }
-// }
+            mission_raw->upload_mission_async(waypoints, [](MissionRaw::Result result) {
+                if (result != MissionRaw::Result::Success) {
+                    std::cout << "Mission upload failed. Error code: " << result << std::endl;
+                } else {
+                    std::cout << "Mission uploaded successfully." << std::endl;
+                }
+            });
+        }).detach();
+
+        break;
+    }
+}
 
     // Send
     if (sendto(cliSockDes, packet.data, sizeof(packet.data), 0,
