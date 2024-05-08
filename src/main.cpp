@@ -69,8 +69,6 @@ int flag_write_waypoint = 0;
 int flag_read_param = 0;
 int flag_write_param = 0;
 
-std::atomic<int> flag_read_param{0};
-
 bool flag_result_read_waypoint = 0;
 bool flag_result_write_waypoint = 0;
 
@@ -317,14 +315,9 @@ int main(int argc, char **argv)
   tv.tv_usec = 0;
   setsockopt(cliSockDes, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(struct timeval));
 
-  Mavsdk mavsdk{Mavsdk::Configuration{Mavsdk::ComponentType::GroundStation}};
+  Mavsdk::Configuration config(Mavsdk::ComponentType::GroundStation);
 
-  auto connection_result = mavsdk.add_any_connection(CONNECTION_PORT);
-
-  if (connection_result == mavsdk::ConnectionResult::Success)
-  {
-    std::cout << "Connected!" << std::endl;
-  }
+  auto mavsdk = std::make_unique<Mavsdk>(config);
 
   auto prom = std::promise<std::shared_ptr<System>>{};
   auto fut = prom.get_future();
@@ -413,17 +406,18 @@ int main(int argc, char **argv)
   telemetry->subscribe_position([](Telemetry::Position position)
                                 {
 #if defined(DEBUG)
-    std::cout << "Altitude & GPS (long, lat)" << std::endl;
-    std::cout << "Altitude AMSL (above mean sea level) in metres: " << position.absolute_altitude_m
-              << " Altitude relative to takeoff altitude in metres: " << position.relative_altitude_m
-              << " Latitude: " << position.latitude_deg
-              << " Longitude: " << position.longitude_deg << std::endl;
+                                  std::cout << "Altitude & GPS (long, lat)" << std::endl;
+                                  std::cout << "Altitude AMSL (above mean sea level) in metres: " << position.absolute_altitude_m
+                                            << " Altitude relative to takeoff altitude in metres: " << position.relative_altitude_m
+                                            << " Latitude: " << position.latitude_deg
+                                            << " Longitude: " << position.longitude_deg << std::endl;
+                                  std::cout << " alt asl" << gps_alt_amsl_val << " alt rel" << gps_alt_rel_val << std::endl;
 #endif
 
-    gps_alt_amsl_val = position.absolute_altitude_m;
-    gps_alt_rel_val = position.relative_altitude_m;
-    gps_lon_val = position.longitude_deg;
-    gps_lat_val = position.latitude_deg; });
+                                  gps_alt_amsl_val = position.absolute_altitude_m;
+                                  gps_alt_rel_val = position.relative_altitude_m;
+                                  gps_lon_val = position.longitude_deg;
+                                  gps_lat_val = position.latitude_deg; });
 
   // gps hdop/vdop
   telemetry->subscribe_raw_gps([](Telemetry::RawGps raw_gps)
@@ -581,6 +575,8 @@ int main(int argc, char **argv)
     memcpy(gps_lat_byte, &gps_lat_val, sizeof(double));
     memcpy(gps_alt_amsl_byte, &gps_alt_amsl_val, sizeof(float));
     memcpy(gps_alt_rel_byte, &gps_alt_rel_val, sizeof(float));
+
+    // std::cout << " alt asl" << gps_alt_amsl_val << " alt rel" << gps_alt_rel_val << std::endl;
 
     // #define VELOCITY_MESSAGE 0x02
     memcpy(velocity_north_byte, &velocity_north_direction, sizeof(float));
