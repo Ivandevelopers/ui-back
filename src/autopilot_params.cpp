@@ -91,7 +91,7 @@ bool readParamsFromControllerToFile(const std::string &filename,
   return 1;
 }
 
-mavsdk::Param::AllParams writeParamsToControllerFromFile(const std::string &filename)
+mavsdk::Param::AllParams writeParamsFromFileToController(const std::string &filename)
 {
   mavsdk::Param::AllParams all_params;
 

@@ -767,21 +767,24 @@ int main(int argc, char **argv)
     {
       std::cout << "Writing waypoints..." << std::endl;
 
-      std::async(std::launch::async, [mission_raw]()
-                 {
-            auto destDir = getDestDirPath() + MISSION_WP_FILENAME;
+      auto destDir = getDestDirPath() + MISSION_WP_FILENAME;
+      auto waypoints = writeWaypointsFromFileToController(destDir);
 
-            auto waypoints = writeWaypointsFromFileToController(destDir);
+      mission_raw->upload_mission_async(waypoints, [](MissionRaw::Result result)
+                                        {
 
-            // mission_raw->upload_mission_async(waypoints, [](MissionRaw::Result result) {
-            //     if (result != MissionRaw::Result::Success) {
-            //         std::cout << "Mission upload failed. Error code: " << result << std::endl;
-            //     } else {
-            //         std::cout << "Mission uploaded successfully." << std::endl;
-            //     }
-            // });
+          if (result != MissionRaw::Result::Success) {
+              std::cout << "Mission upload failed. Error code: " << result << std::endl;
+          } else {
+              std::cout << "Mission uploaded successfully." << std::endl;
+          } });
 
-            mission_raw->upload_mission(waypoints); });
+      // std::async(std::launch::async, [mission_raw]()
+      //            {
+      //       auto destDir = getDestDirPath() + MISSION_WP_FILENAME;
+
+      //       auto waypoints = writeWaypointsFromFileToController(destDir);
+      //       mission_raw->upload_mission(waypoints); });
 
       break;
     }
@@ -806,18 +809,18 @@ int main(int argc, char **argv)
     {
     case 1:
     {
-      std::future<mavsdk::Param::AllParams> future = std::async(writeParamsFromFileToController, (getDestDirPath() + "mav.parm"));
+      // std::future<mavsdk::Param::AllParams> future = std::async(writeParamsFromFileToController, (getDestDirPath() + "mav.parm"));
 
-      mavsdk::Param::AllParams parameters = future.get();
+      // mavsdk::Param::AllParams parameters = future.get();
 
-      for (auto param_int : parameters.int_params)
-      {
-        param->set_param_int(param_int.name, param_int.value);
-      }
-      for (auto param_float : parameters.float_params)
-      {
-        param->set_param_float(param_float.name, param_float.value);
-      }
+      // for (auto param_int : parameters.int_params)
+      // {
+      //   param->set_param_int(param_int.name, param_int.value);
+      // }
+      // for (auto param_float : parameters.float_params)
+      // {
+      //   param->set_param_float(param_float.name, param_float.value);
+      // }
     }
     default:
       break;
