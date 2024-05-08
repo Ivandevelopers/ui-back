@@ -422,13 +422,6 @@ int main(int argc, char **argv)
 #endif
   }
 
-  telemetry->subscribe_health([](Telemetry::Health health) {
-    std::cout << "Is accelerometer ok: " << health.is_accelerometer_calibration_ok << std::endl;
-    std::cout << "Is gyrometer ok: " << health.is_gyrometer_calibration_ok << std::endl;
-    std::cout << "Is magnetometer ok: " << health.is_magnetometer_calibration_ok << std::endl;
-
-  });
-
   // altitude & gps (long, lat)
   telemetry->subscribe_position([](Telemetry::Position position)
                                 {
