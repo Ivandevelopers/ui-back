@@ -27,7 +27,7 @@
 
 using namespace mavsdk;
 
-// #define DEBUG
+#define DEBUG
 
 #define PORT 10000
 
@@ -577,6 +577,10 @@ int main(int argc, char **argv)
     memcpy(gps_alt_amsl_byte, &gps_alt_amsl_val, sizeof(float));
     memcpy(gps_alt_rel_byte, &gps_alt_rel_val, sizeof(float));
 
+    memcpy(gps_hdop_byte, &gps_hdop_val, sizeof(float));
+    memcpy(gps_vdop_byte, &gps_vdop_val, sizeof(float));
+    memcpy(gps_num_satellites_byte, &gps_num_satellites_val, sizeof(int));
+
     // std::cout << " alt asl" << gps_alt_amsl_val << " alt rel" << gps_alt_rel_val << std::endl;
 
     // #define VELOCITY_MESSAGE 0x02
@@ -778,18 +782,7 @@ int main(int argc, char **argv)
         } else {
           std::cout << "Error reading waypoints" << std::endl;
         } });
-
-#if defined(DEBUG)
-      for (auto wp : downloaded_waypoints.second)
-      {
-        std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
-      }
-#endif
-      break;
     }
-
-    default:
-      break;
     }
 
     switch (flag_write_waypoint)
