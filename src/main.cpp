@@ -324,13 +324,21 @@ int main(int argc, char **argv)
   Mavsdk::NewSystemHandle handle =
       mavsdk->subscribe_on_new_system([&mavsdk, &prom, &handle]()
                                       {
+
+        std::cout<<"on sys subscribe"<<std::endl;
         auto system = mavsdk->systems().at(0);
+
+        // mavsdk->first_autopilot(3);
+
+        std::cout << "system->has_autopilot()" << system->has_autopilot()<< std::endl;
+
+        // mavsdk::Autopilot autopilot = system->autopilot_type();        
 
         if (system->is_connected()) {
 
-#if defined(DEBUG) 
-          std::cout << "System is connected!" << std::endl;
+#if defined(DEBUG)
 #endif
+          std::cout << "System is connected!" << std::endl;
 
           connection_status_val = 1;
 
@@ -339,15 +347,23 @@ int main(int argc, char **argv)
         } else {
 
 #if defined(DEBUG)
-          std::cout << "System is not connected!" << std::endl;
 #endif
+          std::cout << "System is not connected!" << std::endl;
 
           // connection_status_val = 0;
         } });
 
+  std::cout << "try to connect to system" << std::endl;
+
   auto connection_result = mavsdk->add_any_connection(CONNECTION_PORT);
 
+  std::cout << "connection_result" << connection_result << std::endl;
+
   auto system = fut.get();
+  // std::cout << "system fut.get" << system << std::endl;
+  // auto system = mavsdk->first_autopilot(3.0);
+
+  std::cout << "system - autopl" << std::endl;
 
   if (connection_result == ConnectionResult::Success)
   {
@@ -369,17 +385,17 @@ int main(int argc, char **argv)
 
   system->subscribe_is_connected([](bool is_connected)
                                  {
-    if(!is_connected) {
+      if(!is_connected) {
 #if defined(DEBUG)
-      std::cout << "System is not connected subscribe" << std::endl;
+        std::cout << "System is not connected subscribe" << std::endl;
 #endif
 
-      connection_status_val = 0;
-    } else {
+        connection_status_val = 0;
+      } else {
 #if defined(DEBUG)
-      std::cout << "System is connected subscribe" << std::endl;
+        std::cout << "System is connected subscribe" << std::endl;
 #endif
-    } });
+      } });
 
   // ready to fly
   bool result_health_all_ok = telemetry->health_all_ok();
