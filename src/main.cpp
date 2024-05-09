@@ -302,6 +302,26 @@ void mavlink_message_callback(const mavlink_message_t &msg)
         imu_yaw_val = attitude.yaw;
         }
 
+      case MAVLINK_MSG_ID_HOME_POSITION: {
+        mavlink_home_position_t home_position;
+
+        mavlink_msg_home_position_decode(&msg, &home_position);
+
+        #if defined(DEBUG)
+          std::cout << "Home position latitude: " << home_position.latitude << std::endl;
+          std::cout << "Home position longitude: " << home_position.longitude << std::endl;
+          std::cout << "Home position altitude: " << home_position.altitude << std::endl;
+
+          std::cout << "Home position x: " << home_position.latitude << std::endl;
+          std::cout << "Home position y: " << home_position.longitude << std::endl;
+          std::cout << "Home position z: " << home_position.altitude << std::endl;
+
+          std::cout << "Home approach x: " << home_position.approach_x << std::endl;
+          std::cout << "Home approach y: " << home_position.approach_y << std::endl;
+          std::cout << "Home approach z: " << home_position.approach_z << std::endl;
+          #endif
+      }
+
     }
 }
 
@@ -331,48 +351,38 @@ int main(int argc, char **argv)
   tv.tv_usec = 0;
   setsockopt(cliSockDes, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(struct timeval));
 
-  Mavsdk::Configuration config(Mavsdk::ComponentType::GroundStation);
+  Mavsdk mavsdk{Mavsdk::Configuration{Mavsdk::ComponentType::GroundStation}};
 
-  auto mavsdk = std::make_unique<Mavsdk>(config);
+  auto connection_result = mavsdk.add_any_connection("udp://:14550");
+  if (connection_result == mavsdk::ConnectionResult::Success) {
+    std::cout << "Connected!" << std::endl;
+  }
 
   auto prom = std::promise<std::shared_ptr<System>>{};
   auto fut = prom.get_future();
   Mavsdk::NewSystemHandle handle =
-      mavsdk->subscribe_on_new_system([&mavsdk, &prom, &handle]()
-                                      {
-        auto system = mavsdk->systems().at(0);
+      mavsdk.subscribe_on_new_system([&mavsdk, &prom, &handle]() {
+        auto system = mavsdk.systems().back();
 
-        if (system->is_connected()) {
-
-#if defined(DEBUG) 
-          std::cout << "System is connected!" << std::endl;
-#endif
-
+        if (system->has_autopilot()) {
+          std::cout << "Discovered Autopilot from Client." << std::endl;
           connection_status_val = 1;
 
-          mavsdk->unsubscribe_on_new_system(handle);
+          mavsdk.unsubscribe_on_new_system(handle);
           prom.set_value(system);
         } else {
+          std::cout << "No MAVSDK found." << std::endl;
+        }
+      });
 
-#if defined(DEBUG)
-          std::cout << "System is not connected!" << std::endl;
-#endif
+  if (fut.wait_for(std::chrono::seconds(10)) == std::future_status::timeout) {
+    std::cout << "No autopilot found, exiting." << std::endl;
+    return 1;
+  }
 
-          // connection_status_val = 0;
-        } });
-
-  auto connection_result = mavsdk->add_any_connection(CONNECTION_PORT);
+  std::this_thread::sleep_for(std::chrono::seconds(10));
 
   auto system = fut.get();
-
-  if (connection_result == ConnectionResult::Success)
-  {
-    std::cout << "System connected" << std::endl;
-  }
-  else
-  {
-    std::cout << "System disconnected" << std::endl;
-  }
 
   auto param = std::make_shared<Param>(system);
   auto telemetry = std::make_shared<Telemetry>(system);
@@ -387,6 +397,9 @@ int main(int argc, char **argv)
 
   // roll, pitch & yaw
   mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_ATTITUDE, mavlink_message_callback);
+
+  //home position
+  mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_HOME_POSITION, mavlink_message_callback);
 
   system->subscribe_is_connected([](bool is_connected) {
     if(!is_connected) {
