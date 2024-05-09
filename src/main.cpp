@@ -27,7 +27,7 @@
 
 using namespace mavsdk;
 
-// #define DEBUG
+#define DEBUG
 
 #define PORT 10000
 
@@ -118,11 +118,11 @@ unsigned char velocity_down_byte[sizeof(velocity_down_direction)];
 #define IMU_MESSAGE 0x03
 float imu_yaw_val;
 float imu_pitch_val;
-float imu_rool_val;
+float imu_roll_val;
 
 unsigned char imu_yaw_byte[sizeof(imu_yaw_val)];
 unsigned char imu_pitch_byte[sizeof(imu_pitch_val)];
-unsigned char imu_rool_byte[sizeof(imu_rool_val)];
+unsigned char imu_roll_byte[sizeof(imu_roll_val)];
 
 #define BATTERY_MESSAGE 0x04
 float batt_voltage;
@@ -256,7 +256,7 @@ void mavlink_message_callback(const mavlink_message_t &msg)
     mavlink_msg_vfr_hud_decode(&msg, &vfr_hud);
 
 #if defined(DEBUG)
-    std::cout << "Azimuth: " << vfr_hud.heading << std::endl;
+    std::cout << "Heading: " << vfr_hud.heading << std::endl;
 #endif
 
     compass_azimuth_val = vfr_hud.heading;
@@ -285,6 +285,22 @@ void mavlink_message_callback(const mavlink_message_t &msg)
     radio_status_rxerrors_val = radio_status.rxerrors;
     radio_status_fixed_val = radio_status.fixed;
     break;
+  }
+
+  case MAVLINK_MSG_ID_ATTITUDE:
+  {
+    mavlink_attitude_t attitude;
+    mavlink_msg_attitude_decode(&msg, &attitude);
+
+#if defined(DEBUG)
+    std::cout << "Roll attitude: " << attitude.roll << std::endl;
+    std::cout << "Pitch attitude: " << attitude.pitch << std::endl;
+    std::cout << "Yaw attitude: " << attitude.yaw << std::endl;
+#endif
+
+    imu_roll_val = attitude.roll;
+    imu_pitch_val = attitude.pitch;
+    imu_yaw_val = attitude.yaw;
   }
   }
 }
@@ -379,13 +395,18 @@ int main(int argc, char **argv)
   auto mission_raw = std::make_shared<MissionRaw>(system);
   auto mavlink_passthrough = std::make_shared<MavlinkPassthrough>(system);
 
+  // heading
   mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_VFR_HUD, mavlink_message_callback);
 
+  // rssi
   mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_RADIO_STATUS, mavlink_message_callback);
+
+  // roll, pitch & yaw
+  mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_ATTITUDE, mavlink_message_callback);
 
   system->subscribe_is_connected([](bool is_connected)
                                  {
-      if(!is_connected) {
+    if(!is_connected) {
 #if defined(DEBUG)
         std::cout << "System is not connected subscribe" << std::endl;
 #endif
@@ -545,25 +566,6 @@ int main(int argc, char **argv)
     velocity_east_direction = vel_ned.east_m_s;
     velocity_down_direction = vel_ned.down_m_s; });
 
-  // roll, pitch & yaw
-  telemetry->subscribe_attitude_angular_velocity_body(
-      [](Telemetry::AngularVelocityBody angular_velocity_body)
-      {
-#if defined(DEBUG)
-        std::cout << "Roll, pitch, yaw" << std::endl;
-        std::cout << "Roll angular velocity: "
-                  << angular_velocity_body.roll_rad_s << std::endl
-                  << "Pitch angular velocity: "
-                  << angular_velocity_body.pitch_rad_s << std::endl
-                  << "Yaw angular velocity: " << angular_velocity_body.yaw_rad_s
-                  << '\n';
-#endif
-
-        imu_rool_val = angular_velocity_body.roll_rad_s;
-        imu_pitch_val = angular_velocity_body.pitch_rad_s;
-        imu_yaw_val = angular_velocity_body.yaw_rad_s;
-      });
-
   // battery
   telemetry->subscribe_battery([](Telemetry::Battery battery)
                                {
@@ -592,6 +594,10 @@ int main(int argc, char **argv)
     memcpy(gps_alt_amsl_byte, &gps_alt_amsl_val, sizeof(float));
     memcpy(gps_alt_rel_byte, &gps_alt_rel_val, sizeof(float));
 
+    memcpy(gps_hdop_byte, &gps_hdop_val, sizeof(float));
+    memcpy(gps_vdop_byte, &gps_vdop_val, sizeof(float));
+    memcpy(gps_num_satellites_byte, &gps_num_satellites_val, sizeof(int));
+
     // std::cout << " alt asl" << gps_alt_amsl_val << " alt rel" << gps_alt_rel_val << std::endl;
 
     // #define VELOCITY_MESSAGE 0x02
@@ -602,7 +608,7 @@ int main(int argc, char **argv)
     // #define IMU_MESAGE 0x03
     memcpy(imu_yaw_byte, &imu_yaw_val, sizeof(float));
     memcpy(imu_pitch_byte, &imu_pitch_val, sizeof(float));
-    memcpy(imu_rool_byte, &imu_rool_val, sizeof(float));
+    memcpy(imu_roll_byte, &imu_roll_val, sizeof(float));
 
     // #define BATTERY_MESSAGE 0x04
     memcpy(batt_voltage_byte, &batt_voltage, sizeof(float));
@@ -620,7 +626,7 @@ int main(int argc, char **argv)
     memcpy(ready_to_fly_byte, &ready_to_fly_val, sizeof(bool));
 
     // #define COMPASS_MESSAGE 0x08
-    memcpy(compass_azimuth_byte, &compass_azimuth_val, sizeof(int));
+    memcpy(compass_azimuth_byte, &compass_azimuth_val, sizeof(int16_t));
 
     // #define RADIO_STATUS 0x09
     memcpy(radio_status_rssi_byte, &radio_status_rssi_val, sizeof(uint8_t));
@@ -708,10 +714,10 @@ int main(int argc, char **argv)
     packet.data[56] = imu_pitch_byte[2];
     packet.data[57] = imu_pitch_byte[3];
 
-    packet.data[58] = imu_rool_byte[0];
-    packet.data[59] = imu_rool_byte[1];
-    packet.data[60] = imu_rool_byte[2];
-    packet.data[61] = imu_rool_byte[3];
+    packet.data[58] = imu_roll_byte[0];
+    packet.data[59] = imu_roll_byte[1];
+    packet.data[60] = imu_roll_byte[2];
+    packet.data[61] = imu_roll_byte[3];
     //////////////////////////////////////////////////////////////////////////
     packet.data[62] = batt_voltage_byte[0];
     packet.data[63] = batt_voltage_byte[1];
@@ -794,18 +800,7 @@ int main(int argc, char **argv)
         } else {
           std::cout << "Error reading waypoints" << std::endl;
         } });
-
-#if defined(DEBUG)
-      for (auto wp : downloaded_waypoints.second)
-      {
-        std::cout << wp.seq << " " << wp.x << " " << wp.y << std::endl;
-      }
-#endif
-      break;
     }
-
-    default:
-      break;
     }
 
     switch (flag_write_waypoint)
