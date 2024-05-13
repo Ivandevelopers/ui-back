@@ -33,9 +33,9 @@ using namespace mavsdk;
 
 #define CONNECTION_PORT "udp://:14550" // 14552
 
-#define PACKET_SIZE 105
+#define PACKET_SIZE 117
 
-#define PACKET_SIZE_RX 12
+#define PACKET_SIZE_RX 24
 
 // dev
 #define DIR_NAME "/data/"
@@ -172,6 +172,26 @@ unsigned char radio_status_remnoise_byte[sizeof(radio_status_remnoise_val)];
 unsigned char radio_status_rxerrors_byte[sizeof(radio_status_rxerrors_val)];
 unsigned char radio_status_fixed_byte[sizeof(radio_status_fixed_val)];
 
+#define HOME_POSITION 0x09
+int home_latitude_val;
+int home_longitude_val;
+int home_altitude_val;
+
+unsigned char home_latitude_byte[sizeof(home_latitude_val)];
+unsigned char home_longitude_byte[sizeof(home_longitude_val)];
+unsigned char home_altitude_byte[sizeof(home_altitude_val)];
+
+int home_latitude_val_rcv;
+int home_longitude_val_rcv;
+int home_altitude_val_rcv;
+
+unsigned char home_latitude_byte_rcv[sizeof(home_latitude_val_rcv)];
+unsigned char home_longitude_byte_rcv[sizeof(home_longitude_val_rcv)];
+unsigned char home_altitude_byte_rcv[sizeof(home_altitude_val_rcv)];
+
+int request_home = 0;
+
+
 struct Packet
 {
   unsigned char data[PACKET_SIZE];
@@ -301,27 +321,6 @@ void mavlink_message_callback(const mavlink_message_t &msg)
         imu_pitch_val = attitude.pitch;
         imu_yaw_val = attitude.yaw;
         }
-
-      case MAVLINK_MSG_ID_HOME_POSITION: {
-        mavlink_home_position_t home_position;
-
-        mavlink_msg_home_position_decode(&msg, &home_position);
-
-        #if defined(DEBUG)
-          std::cout << "Home position latitude: " << home_position.latitude << std::endl;
-          std::cout << "Home position longitude: " << home_position.longitude << std::endl;
-          std::cout << "Home position altitude: " << home_position.altitude << std::endl;
-
-          std::cout << "Home position x: " << home_position.latitude << std::endl;
-          std::cout << "Home position y: " << home_position.longitude << std::endl;
-          std::cout << "Home position z: " << home_position.altitude << std::endl;
-
-          std::cout << "Home approach x: " << home_position.approach_x << std::endl;
-          std::cout << "Home approach y: " << home_position.approach_y << std::endl;
-          std::cout << "Home approach z: " << home_position.approach_z << std::endl;
-          #endif
-      }
-
     }
 }
 
@@ -398,9 +397,6 @@ int main(int argc, char **argv)
   // roll, pitch & yaw
   mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_ATTITUDE, mavlink_message_callback);
 
-  //home position
-  mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_HOME_POSITION, mavlink_message_callback);
-
   system->subscribe_is_connected([](bool is_connected) {
     if(!is_connected) {
 #if defined(DEBUG)
@@ -471,6 +467,52 @@ int main(int argc, char **argv)
 #endif
 
     gps_num_satellites_val = gps_info.num_satellites; });
+
+  if(request_home == 1) {
+
+  MavlinkPassthrough::CommandLong command_long;
+
+  uint8_t target_sysid = mavlink_passthrough->get_target_sysid();
+  uint8_t target_compid = mavlink_passthrough->get_target_compid();
+
+  command_long.target_sysid = target_sysid;
+  command_long.target_compid = target_compid;
+  command_long.command = MAV_CMD_REQUEST_MESSAGE;
+  command_long.param1 = 242;
+  command_long.param2 = 0;
+  command_long.param3 = 0;
+  command_long.param4 = 0;
+  command_long.param5 = 0;
+  command_long.param6 = 0;
+  command_long.param7 = 0;
+
+  MavlinkPassthrough::Result mavlink_result = mavlink_passthrough->send_command_long(command_long);
+  if(mavlink_result == MavlinkPassthrough::Result::Success) {
+    std::cout << "Command successfully send" << std::endl;
+  } else {
+    std::cout << "Command don`t send " << mavlink_result << std::endl;
+  }
+
+  mavlink_message_t mavlink_ack = mavlink_passthrough->make_command_ack_message(target_sysid, target_compid, MAV_CMD_GET_HOME_POSITION, MAV_RESULT_ACCEPTED);
+  }
+
+
+  mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_COMMAND_ACK, [](const mavlink_message_t &msg){
+  
+    mavlink_home_position_t home_position;
+
+    mavlink_msg_home_position_decode(&msg, &home_position);
+
+    std::cout << "Home lat:" << home_position.latitude << std::endl;
+
+    std::cout << "Home long: " << home_position.longitude << std::endl;
+
+    std::cout << "Home alt: " << home_position.altitude << std::endl;
+
+    home_latitude_val = home_position.latitude;
+    home_longitude_val = home_position.longitude;
+    home_altitude_val = home_position.altitude;
+  });
 
   // flight mode
   telemetry->subscribe_flight_mode([](Telemetry::FlightMode flight_mode)
@@ -578,7 +620,7 @@ int main(int argc, char **argv)
     batt_voltage = battery.voltage_v;
     batt_current = battery.current_battery_a;
     batt_charge = battery.capacity_consumed_ah;
-    batt_remaining = battery.remaining_percent; });
+    batt_remaining = battery.remaining_percent; });    
 
   while (1)
   {
@@ -637,6 +679,10 @@ int main(int argc, char **argv)
     memcpy(flag_result_write_waypoint_byte, &flag_result_write_waypoint, sizeof(bool));
     memcpy(flag_result_read_param_byte, &flag_result_read_param, sizeof(bool));
     memcpy(flag_result_write_param_byte, &flag_result_write_param, sizeof(bool));
+
+    memcpy(home_latitude_byte, &home_latitude_val, sizeof(int));
+    memcpy(home_longitude_byte, &home_longitude_val, sizeof(int));
+    memcpy(home_altitude_byte, &home_altitude_val, sizeof(int));
 
     // Set to buf
     packet.data[0] = 0x55; // STX  starting mark Low byte in the front
@@ -771,9 +817,24 @@ int main(int argc, char **argv)
 
     packet.data[101] = flag_result_write_param_byte[0];
 
+    packet.data[102] = home_latitude_byte[0];
+    packet.data[103] = home_latitude_byte[1];
+    packet.data[104] = home_latitude_byte[2];
+    packet.data[105] = home_latitude_byte[3];
+
+    packet.data[106] = home_longitude_byte[0];
+    packet.data[107] = home_longitude_byte[1];
+    packet.data[108] = home_longitude_byte[2];
+    packet.data[109] = home_longitude_byte[3];
+
+    packet.data[110] = home_altitude_byte[0];
+    packet.data[111] = home_altitude_byte[1];
+    packet.data[112] = home_altitude_byte[2];
+    packet.data[113] = home_altitude_byte[3];
+
     //////////////////////////////////////////////////////////////////////////
-    packet.data[102] = 0x03;
-    packet.data[103] = 0x07;
+    packet.data[114] = 0x03;
+    packet.data[115] = 0x07;
 
     // Calc to CRC16
     packet.crc16 = CRC16_cal(packet.data, PACKET_SIZE - 2, *crc16_tab);
@@ -923,6 +984,10 @@ int main(int argc, char **argv)
     std::cout << "   Write_waypoint " << flag_write_waypoint;
     std::cout << "   Read_param " << flag_read_param;
     std::cout << "   Write_param " << flag_write_param << std::endl;
+
+    std::cout << " Home lat " << home_latitude_val_rcv << std::endl;
+    std::cout << " Home long " << home_longitude_val_rcv << std::endl;
+    std::cout << " Home alt " << home_altitude_val_rcv << std::endl;
 
 #endif
 
