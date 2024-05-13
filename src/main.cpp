@@ -27,11 +27,11 @@
 
 using namespace mavsdk;
 
-#define DEBUG
+// #define DEBUG
 
 #define PORT 10000
 
-#define CONNECTION_PORT "udp://:14550" // 14552
+#define CONNECTION_PORT "udp://:14552" // 14552
 
 #define PACKET_SIZE 105
 
@@ -354,7 +354,7 @@ int main(int argc, char **argv)
 
   Mavsdk mavsdk{Mavsdk::Configuration{Mavsdk::ComponentType::GroundStation}};
 
-  auto connection_result = mavsdk.add_any_connection("udp://:14550");
+  auto connection_result = mavsdk.add_any_connection(CONNECTION_PORT);
   if (connection_result == mavsdk::ConnectionResult::Success) {
     std::cout << "Connected!" << std::endl;
   }
@@ -376,12 +376,7 @@ int main(int argc, char **argv)
         }
       });
 
-  if (fut.wait_for(std::chrono::seconds(10)) == std::future_status::timeout) {
-    std::cout << "No autopilot found, exiting." << std::endl;
-    return 1;
-  }
-
-  std::this_thread::sleep_for(std::chrono::seconds(10));
+  fut.wait();
 
   std::cout << "connection_result" << connection_result << std::endl;
   auto system = fut.get();
