@@ -33,7 +33,7 @@ using namespace mavsdk;
 
 #define CONNECTION_PORT "udp://:14550" // 14552
 
-#define PACKET_SIZE 117
+#define PACKET_SIZE 125
 
 #define PACKET_SIZE_RX 24
 
@@ -189,8 +189,14 @@ unsigned char home_latitude_byte_rcv[sizeof(home_latitude_val_rcv)];
 unsigned char home_longitude_byte_rcv[sizeof(home_longitude_val_rcv)];
 unsigned char home_altitude_byte_rcv[sizeof(home_altitude_val_rcv)];
 
-int request_home = 0;
+int flag_read_home_position = 1;
+int flag_write_home_position = 1;
 
+int flag_read_home_position_ready = 0;
+int flag_write_home_position_ready = 0;
+
+unsigned char flag_read_home_position_ready_byte[sizeof(flag_read_home_position_ready)];
+unsigned char flag_write_home_position_ready_byte[sizeof(flag_write_home_position_ready)];
 
 struct Packet
 {
@@ -397,6 +403,8 @@ int main(int argc, char **argv)
   // roll, pitch & yaw
   mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_ATTITUDE, mavlink_message_callback);
 
+  //mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_HOME_POSITION, mavlink_message_callback);
+
   system->subscribe_is_connected([](bool is_connected) {
     if(!is_connected) {
 #if defined(DEBUG)
@@ -468,51 +476,49 @@ int main(int argc, char **argv)
 
     gps_num_satellites_val = gps_info.num_satellites; });
 
-  if(request_home == 1) {
+  // home position
 
-  MavlinkPassthrough::CommandLong command_long;
+  if(flag_read_home_position == 1) {
 
-  uint8_t target_sysid = mavlink_passthrough->get_target_sysid();
-  uint8_t target_compid = mavlink_passthrough->get_target_compid();
+  Telemetry::HomeHandle home_handle = telemetry->subscribe_home([](Telemetry::Position home_position)
+                              {
+        std::cout << "NEW HOME POS" << std::endl;
+        std::cout << "Home lat:" << home_position.latitude_deg << std::endl;
+        std::cout << "Home long: " << home_position.longitude_deg << std::endl;
+        std::cout << "Home alt: " << home_position.absolute_altitude_m << std::endl;
 
-  command_long.target_sysid = target_sysid;
-  command_long.target_compid = target_compid;
-  command_long.command = MAV_CMD_REQUEST_MESSAGE;
-  command_long.param1 = 242;
-  command_long.param2 = 0;
-  command_long.param3 = 0;
-  command_long.param4 = 0;
-  command_long.param5 = 0;
-  command_long.param6 = 0;
-  command_long.param7 = 0;
-
-  MavlinkPassthrough::Result mavlink_result = mavlink_passthrough->send_command_long(command_long);
-  if(mavlink_result == MavlinkPassthrough::Result::Success) {
-    std::cout << "Command successfully send" << std::endl;
-  } else {
-    std::cout << "Command don`t send " << mavlink_result << std::endl;
+        home_latitude_val = home_position.latitude_deg;
+        home_longitude_val = home_position.longitude_deg;
+        home_altitude_val = home_position.absolute_altitude_m;
+    });
   }
 
-  mavlink_message_t mavlink_ack = mavlink_passthrough->make_command_ack_message(target_sysid, target_compid, MAV_CMD_GET_HOME_POSITION, MAV_RESULT_ACCEPTED);
+  if(flag_write_home_position) {
+
+  mavsdk::MavlinkPassthrough::CommandLong set_pos_cmd = {
+        mavlink_passthrough->get_target_sysid(),
+        mavlink_passthrough->get_target_compid(),
+        MAV_CMD_DO_SET_HOME,
+        MAV_FRAME_GLOBAL,
+        0,
+        0,
+        0,
+        49.74637,
+        24.23790,
+        262.7,
+    };
+
+    MavlinkPassthrough::Result mavlink_result = mavlink_passthrough->send_command_long(set_pos_cmd);
+
+    if (mavlink_result == MavlinkPassthrough::Result::Success)
+    {
+        std::cout << "Write home position command successfully send" << std::endl;
+    }
+    else
+    {
+        std::cout << "Write home position command don`t send " << mavlink_result << std::endl;
+    }
   }
-
-
-  mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_COMMAND_ACK, [](const mavlink_message_t &msg){
-  
-    mavlink_home_position_t home_position;
-
-    mavlink_msg_home_position_decode(&msg, &home_position);
-
-    std::cout << "Home lat:" << home_position.latitude << std::endl;
-
-    std::cout << "Home long: " << home_position.longitude << std::endl;
-
-    std::cout << "Home alt: " << home_position.altitude << std::endl;
-
-    home_latitude_val = home_position.latitude;
-    home_longitude_val = home_position.longitude;
-    home_altitude_val = home_position.altitude;
-  });
 
   // flight mode
   telemetry->subscribe_flight_mode([](Telemetry::FlightMode flight_mode)
@@ -684,6 +690,9 @@ int main(int argc, char **argv)
     memcpy(home_longitude_byte, &home_longitude_val, sizeof(int));
     memcpy(home_altitude_byte, &home_altitude_val, sizeof(int));
 
+    memcpy(flag_read_home_position_ready_byte, &flag_read_home_position_ready, sizeof(int));
+    memcpy(flag_write_home_position_ready_byte, &flag_write_home_position_ready, sizeof(int));
+
     // Set to buf
     packet.data[0] = 0x55; // STX  starting mark Low byte in the front
     packet.data[1] = 0x66; // STX  starting mark Low byte in the front
@@ -832,9 +841,18 @@ int main(int argc, char **argv)
     packet.data[112] = home_altitude_byte[2];
     packet.data[113] = home_altitude_byte[3];
 
+    packet.data[114] = flag_read_home_position_ready_byte[0];
+    packet.data[115] = flag_read_home_position_ready_byte[1];
+    packet.data[116] = flag_read_home_position_ready_byte[2];
+    packet.data[117] = flag_read_home_position_ready_byte[3];
+
+    packet.data[118] = flag_write_home_position_ready_byte[0];
+    packet.data[119] = flag_write_home_position_ready_byte[1];
+    packet.data[120] = flag_write_home_position_ready_byte[2];
+    packet.data[121] = flag_write_home_position_ready_byte[3];
     //////////////////////////////////////////////////////////////////////////
-    packet.data[114] = 0x03;
-    packet.data[115] = 0x07;
+    packet.data[122] = 0x03;
+    packet.data[123] = 0x07;
 
     // Calc to CRC16
     packet.crc16 = CRC16_cal(packet.data, PACKET_SIZE - 2, *crc16_tab);
