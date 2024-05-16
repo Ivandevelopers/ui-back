@@ -69,17 +69,17 @@ int flag_write_waypoint = 0;
 int flag_read_param = 0;
 int flag_write_param = 0;
 
-bool flag_result_read_waypoint = 0;
-bool flag_result_write_waypoint = 0;
+std::atomic<bool> flag_read_waypoint_ready = false;
+std::atomic<bool> flag_write_waypoint_ready = false;
 
-bool flag_result_read_param = 0;
-bool flag_result_write_param = 0;
+bool flag_read_param_ready = 0;
+bool flag_write_param_ready = 0;
 
-unsigned char flag_result_read_waypoint_byte[sizeof(flag_read_waypoint)];
-unsigned char flag_result_write_waypoint_byte[sizeof(flag_write_waypoint)];
+unsigned char flag_read_waypoint_ready_byte[sizeof(flag_read_waypoint_ready)];
+unsigned char flag_write_waypoint_ready_byte[sizeof(flag_write_waypoint_ready)];
 
-unsigned char flag_result_read_param_byte[sizeof(flag_read_param)];
-unsigned char flag_result_write_param_byte[sizeof(flag_write_param)];
+unsigned char flag_read_param_ready_byte[sizeof(flag_read_param_ready)];
+unsigned char flag_write_param_ready_byte[sizeof(flag_write_param_ready)];
 
 uint32_t result = 0;
 
@@ -136,7 +136,7 @@ unsigned char batt_charge_byte[sizeof(batt_charge)];
 unsigned char batt_remaining_byte[sizeof(batt_remaining)];
 
 #define CONNECTION_STATUS 0x05
-int connection_status_val;
+int connection_status_val = 0;
 
 unsigned char connection_status_byte[sizeof(connection_status_val)];
 
@@ -383,7 +383,9 @@ int main(int argc, char **argv)
   // std::cout << "system fut.get" << system << std::endl;
   // auto system = mavsdk->first_autopilot(3.0);
 
-  std::cout << "system - autopl" << std::endl;
+  system->subscribe_is_connected([](bool is_connected) {
+      connection_status_val = is_connected;
+  });
 
   auto param = std::make_shared<Param>(system);
   auto telemetry = std::make_shared<Telemetry>(system);
@@ -402,39 +404,14 @@ int main(int argc, char **argv)
   //home position
   mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_HOME_POSITION, mavlink_message_callback);
 
-  system->subscribe_is_connected([](bool is_connected) {
-    if(!is_connected) {
+  // todo research & test with GPS signal
+  // https://mavsdk.mavlink.io/v2.0/en/cpp/api_reference/structmavsdk_1_1_telemetry_1_1_health.html#mavsdktelemetryhealth-struct-reference
+  telemetry->subscribe_health_all_ok([](bool health_all_ok) {
+    ready_to_fly_val = health_all_ok;
 #if defined(DEBUG)
-        std::cout << "System is not connected subscribe" << std::endl;
+    std::cout << "Systme all healths stus: " << health_all_ok << std::endl;
 #endif
-
-        connection_status_val = 0;
-      } else {
-#if defined(DEBUG)
-        std::cout << "System is connected subscribe" << std::endl;
-#endif
-      } });
-
-  // ready to fly
-  bool result_health_all_ok = telemetry->health_all_ok();
-
-  if (result_health_all_ok == 1)
-  {
-    ready_to_fly_val = 1;
-
-#if defined(DEBUG)
-    std::cout << "Ready to fly" << std::endl;
-#endif
-  }
-
-  else
-  {
-
-    ready_to_fly_val = 0;
-#if defined(DEBUG)
-    std::cout << "Not ready to fly " << result_health_all_ok << std::endl;
-#endif
-  }
+  });
 
   // altitude & gps (long, lat)
   telemetry->subscribe_position([](Telemetry::Position position)
@@ -583,6 +560,84 @@ int main(int argc, char **argv)
 
   while (1)
   {
+
+    switch (flag_read_waypoint)
+    {
+    case 1:
+    {
+      mission_raw->download_mission_async([&](MissionRaw::Result result, std::vector<MissionRaw::MissionItem> items)
+                                          {
+        if (result == MissionRaw::Result::Success) {
+            std::cout << "Mission download successful: " << std::endl;
+            readWaypointsFromControllerToFile(items, getDestDirPath() + MISSION_WP_FILENAME);
+
+            flag_read_waypoint_ready.store(true, std::memory_order_release);
+        } else {
+          std::cout << "Error reading waypoints" << std::endl;
+        } });
+    }
+    }
+
+    switch (flag_write_waypoint)
+    {
+    case 1:
+    {
+      std::cout << "Writing waypoints..." << std::endl;
+
+      auto destDir = getDestDirPath() + MISSION_WP_FILENAME;
+      auto waypoints = writeWaypointsFromFileToController(destDir);
+
+      mission_raw->upload_mission_async(waypoints, [&](MissionRaw::Result result)
+                                        {
+
+          if (result != MissionRaw::Result::Success) {
+              std::cout << "Mission upload failed. Error code: " << result << std::endl;
+          } else {
+              std::cout << "Mission uploaded successfully." << std::endl;
+              
+              flag_write_waypoint_ready.store(true, std::memory_order_release);
+          } });
+
+      break;
+    }
+    }
+
+    // TODO: fix async operation
+    switch (flag_read_param)
+    {
+    case 1:
+    {
+      // todo
+      break;
+    }
+    default:
+      break;
+    }
+
+    // TODO: add async
+    switch (flag_write_param)
+    {
+    case 1:
+    {
+      // std::future<mavsdk::Param::AllParams> future = std::async(writeParamsFromFileToController, (getDestDirPath() + "mav.parm"));
+
+      // mavsdk::Param::AllParams parameters = future.get();
+
+      // for (auto param_int : parameters.int_params)
+      // {
+      //   param->set_param_int(param_int.name, param_int.value);
+      // }
+      // for (auto param_float : parameters.float_params)
+      // {
+      //   param->set_param_float(param_float.name, param_float.value);
+      // }
+    }
+    default:
+      break;
+    }
+
+
+
     // Convert float to byte
 
     // #define GPS_MESSAGE 0x01
@@ -634,10 +689,22 @@ int main(int argc, char **argv)
     memcpy(radio_status_rxerrors_byte, &radio_status_rxerrors_val, sizeof(uint16_t));
     memcpy(radio_status_fixed_byte, &radio_status_fixed_val, sizeof(uint16_t));
 
-    memcpy(flag_result_read_waypoint_byte, &flag_result_read_waypoint, sizeof(bool));
-    memcpy(flag_result_write_waypoint_byte, &flag_result_write_waypoint, sizeof(bool));
-    memcpy(flag_result_read_param_byte, &flag_result_read_param, sizeof(bool));
-    memcpy(flag_result_write_param_byte, &flag_result_write_param, sizeof(bool));
+    bool _flag_read_waypoint_ready = flag_read_waypoint_ready.load(std::memory_order_acquire);
+    memcpy(flag_read_waypoint_ready_byte, &_flag_read_waypoint_ready, sizeof(bool));
+    if (_flag_read_waypoint_ready)
+    {
+      flag_read_waypoint_ready.store(false, std::memory_order_release);
+    }
+
+    bool _flag_write_waypoint_ready = flag_write_waypoint_ready.load(std::memory_order_acquire);
+    memcpy(flag_write_waypoint_ready_byte, &_flag_write_waypoint_ready, sizeof(bool));
+    if (_flag_write_waypoint_ready)
+    {
+      flag_write_waypoint_ready.store(false, std::memory_order_release);
+    }
+
+    memcpy(flag_read_param_ready_byte, &flag_read_param_ready, sizeof(bool));
+    memcpy(flag_write_param_ready_byte, &flag_write_param_ready, sizeof(bool));
 
     // Set to buf
     packet.data[0] = 0x55; // STX  starting mark Low byte in the front
@@ -764,13 +831,13 @@ int main(int argc, char **argv)
     packet.data[96] = radio_status_fixed_byte[0];
     packet.data[97] = radio_status_fixed_byte[1];
 
-    packet.data[98] = flag_result_read_waypoint_byte[0];
+    packet.data[98] = flag_read_waypoint_ready_byte[0];
 
-    packet.data[99] = flag_result_write_waypoint_byte[0];
+    packet.data[99] = flag_write_waypoint_ready_byte[0];
 
-    packet.data[100] = flag_result_read_param_byte[0];
+    packet.data[100] = flag_read_param_ready_byte[0];
 
-    packet.data[101] = flag_result_write_param_byte[0];
+    packet.data[101] = flag_write_param_ready_byte[0];
 
     //////////////////////////////////////////////////////////////////////////
     packet.data[102] = 0x03;
@@ -782,88 +849,6 @@ int main(int argc, char **argv)
     // Set CRC to buf
     packet.data[PACKET_SIZE - 2] = (char)(packet.crc16 & 0xFF);
     packet.data[PACKET_SIZE - 1] = (char)((packet.crc16 >> 8) & 0xFF);
-
-    switch (flag_read_waypoint)
-    {
-    case 1:
-    {
-      mission_raw->download_mission_async([](MissionRaw::Result result, std::vector<MissionRaw::MissionItem> items)
-                                          {
-        if (result == MissionRaw::Result::Success) {
-            std::cout << "Mission download successful: " << std::endl;
-            readWaypointsFromControllerToFile(items, getDestDirPath() + MISSION_WP_FILENAME);
-
-            flag_result_read_waypoint = 1;
-        } else {
-          std::cout << "Error reading waypoints" << std::endl;
-        } });
-    }
-    }
-
-    switch (flag_write_waypoint)
-    {
-    case 1:
-    {
-      std::cout << "Writing waypoints..." << std::endl;
-
-      auto destDir = getDestDirPath() + MISSION_WP_FILENAME;
-      auto waypoints = writeWaypointsFromFileToController(destDir);
-
-      mission_raw->upload_mission_async(waypoints, [](MissionRaw::Result result)
-                                        {
-
-          if (result != MissionRaw::Result::Success) {
-              std::cout << "Mission upload failed. Error code: " << result << std::endl;
-          } else {
-              std::cout << "Mission uploaded successfully." << std::endl;
-          } });
-
-      // std::async(std::launch::async, [mission_raw]()
-      //            {
-      //       auto destDir = getDestDirPath() + MISSION_WP_FILENAME;
-
-      //       auto waypoints = writeWaypointsFromFileToController(destDir);
-      //       mission_raw->upload_mission(waypoints); });
-
-      break;
-    }
-    }
-
-    // TODO: fix async operation
-
-    switch (flag_read_param)
-    {
-    case 1:
-    {
-      // todo
-      break;
-    }
-    default:
-      break;
-    }
-
-    // TODO: add async
-
-    switch (flag_write_param)
-    {
-    case 1:
-    {
-      // std::future<mavsdk::Param::AllParams> future = std::async(writeParamsFromFileToController, (getDestDirPath() + "mav.parm"));
-
-      // mavsdk::Param::AllParams parameters = future.get();
-
-      // for (auto param_int : parameters.int_params)
-      // {
-      //   param->set_param_int(param_int.name, param_int.value);
-      // }
-      // for (auto param_float : parameters.float_params)
-      // {
-      //   param->set_param_float(param_float.name, param_float.value);
-      // }
-    }
-    default:
-      break;
-    }
 
     // Send
     if (sendto(cliSockDes, packet.data, sizeof(packet.data), 0,
