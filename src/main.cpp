@@ -33,9 +33,9 @@ using namespace mavsdk;
 
 #define CONNECTION_PORT "udp://:14552" // 14552
 
-#define PACKET_SIZE 125
+#define PACKET_SIZE 132
 
-#define PACKET_SIZE_RX 24
+#define PACKET_SIZE_RX 12//24
 
 // dev
 #define DIR_NAME "/data/"
@@ -173,9 +173,9 @@ unsigned char radio_status_rxerrors_byte[sizeof(radio_status_rxerrors_val)];
 unsigned char radio_status_fixed_byte[sizeof(radio_status_fixed_val)];
 
 #define HOME_POSITION 0x09
-int home_latitude_val;
-int home_longitude_val;
-int home_altitude_val;
+double home_latitude_val;
+double home_longitude_val;
+float home_altitude_val;
 
 unsigned char home_latitude_byte[sizeof(home_latitude_val)];
 unsigned char home_longitude_byte[sizeof(home_longitude_val)];
@@ -189,7 +189,7 @@ unsigned char home_latitude_byte_rcv[sizeof(home_latitude_val_rcv)];
 unsigned char home_longitude_byte_rcv[sizeof(home_longitude_val_rcv)];
 unsigned char home_altitude_byte_rcv[sizeof(home_altitude_val_rcv)];
 
-int flag_read_home_position = 1;
+int flag_read_home_position = 0;
 int flag_write_home_position = 0;
 
 int flag_read_home_position_ready = 0;
@@ -455,21 +455,22 @@ int main(int argc, char **argv)
     gps_num_satellites_val = gps_info.num_satellites; });
 
   // home position
-
-  if(flag_read_home_position == 1) {
-
   Telemetry::HomeHandle home_handle = telemetry->subscribe_home([](Telemetry::Position home_position)
                               {
+#if defined(DEBUG)
         std::cout << "NEW HOME POS" << std::endl;
         std::cout << "Home lat:" << home_position.latitude_deg << std::endl;
         std::cout << "Home long: " << home_position.longitude_deg << std::endl;
         std::cout << "Home alt: " << home_position.absolute_altitude_m << std::endl;
-
+#endif
         home_latitude_val = home_position.latitude_deg;
         home_longitude_val = home_position.longitude_deg;
         home_altitude_val = home_position.absolute_altitude_m;
+
+        // flag_read_home_position_ready.store(true, std::memory_order_release);
+        flag_read_home_position_ready = 1;
     });
-  }
+
 
   if(flag_write_home_position) {
 
@@ -754,9 +755,9 @@ int main(int argc, char **argv)
     memcpy(flag_read_param_ready_byte, &flag_read_param_ready, sizeof(bool));
     memcpy(flag_write_param_ready_byte, &flag_write_param_ready, sizeof(bool));
 
-    memcpy(home_latitude_byte, &home_latitude_val, sizeof(int));
-    memcpy(home_longitude_byte, &home_longitude_val, sizeof(int));
-    memcpy(home_altitude_byte, &home_altitude_val, sizeof(int));
+    memcpy(home_latitude_byte, &home_latitude_val, sizeof(double));
+    memcpy(home_longitude_byte, &home_longitude_val, sizeof(double));
+    memcpy(home_altitude_byte, &home_altitude_val, sizeof(float));
 
     memcpy(flag_read_home_position_ready_byte, &flag_read_home_position_ready, sizeof(int));
     memcpy(flag_write_home_position_ready_byte, &flag_write_home_position_ready, sizeof(int));
@@ -894,33 +895,45 @@ int main(int argc, char **argv)
 
     packet.data[101] = flag_write_param_ready_byte[0];
 
+    /*************************** HOME POSITION */
     packet.data[102] = home_latitude_byte[0];
     packet.data[103] = home_latitude_byte[1];
     packet.data[104] = home_latitude_byte[2];
     packet.data[105] = home_latitude_byte[3];
+    packet.data[106] = home_latitude_byte[4];
+    packet.data[107] = home_latitude_byte[5];
+    packet.data[108] = home_latitude_byte[6];
+    packet.data[109] = home_latitude_byte[7];
 
-    packet.data[106] = home_longitude_byte[0];
-    packet.data[107] = home_longitude_byte[1];
-    packet.data[108] = home_longitude_byte[2];
-    packet.data[109] = home_longitude_byte[3];
+    packet.data[110] = home_longitude_byte[0];
+    packet.data[111] = home_longitude_byte[1];
+    packet.data[112] = home_longitude_byte[2];
+    packet.data[113] = home_longitude_byte[3];
+    packet.data[114] = home_longitude_byte[4];
+    packet.data[115] = home_longitude_byte[5];
+    packet.data[116] = home_longitude_byte[6];
+    packet.data[117] = home_longitude_byte[7];
 
-    packet.data[110] = home_altitude_byte[0];
-    packet.data[111] = home_altitude_byte[1];
-    packet.data[112] = home_altitude_byte[2];
-    packet.data[113] = home_altitude_byte[3];
+    packet.data[118] = home_altitude_byte[0];
+    packet.data[119] = home_altitude_byte[1];
+    packet.data[120] = home_altitude_byte[2];
+    packet.data[121] = home_altitude_byte[3];
 
-    packet.data[114] = flag_read_home_position_ready_byte[0];
-    packet.data[115] = flag_read_home_position_ready_byte[1];
-    packet.data[116] = flag_read_home_position_ready_byte[2];
-    packet.data[117] = flag_read_home_position_ready_byte[3];
+    /****************************** READ HOME POSITION - RESULT */
+    packet.data[122] = flag_read_home_position_ready_byte[0];
+    packet.data[123] = flag_read_home_position_ready_byte[1];
+    packet.data[124] = flag_read_home_position_ready_byte[2];
+    packet.data[125] = flag_read_home_position_ready_byte[3];
 
-    packet.data[118] = flag_write_home_position_ready_byte[0];
-    packet.data[119] = flag_write_home_position_ready_byte[1];
-    packet.data[120] = flag_write_home_position_ready_byte[2];
-    packet.data[121] = flag_write_home_position_ready_byte[3];
+    /****************************** WRITE HOME POSITION - RESULT */
+    packet.data[126] = flag_write_home_position_ready_byte[0];
+    packet.data[127] = flag_write_home_position_ready_byte[1];
+    packet.data[128] = flag_write_home_position_ready_byte[2];
+    packet.data[129] = flag_write_home_position_ready_byte[3];
+
     //////////////////////////////////////////////////////////////////////////
-    packet.data[122] = 0x03;
-    packet.data[123] = 0x07;
+    packet.data[130] = 0x03;
+    packet.data[131] = 0x07;
 
     // Calc to CRC16
     packet.crc16 = CRC16_cal(packet.data, PACKET_SIZE - 2, *crc16_tab);
