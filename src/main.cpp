@@ -35,7 +35,7 @@ using namespace mavsdk;
 
 #define PACKET_SIZE 132
 
-#define PACKET_SIZE_RX 12//24
+#define PACKET_SIZE_RX 36
 
 // dev
 #define DIR_NAME "/data/"
@@ -172,6 +172,7 @@ unsigned char radio_status_remnoise_byte[sizeof(radio_status_remnoise_val)];
 unsigned char radio_status_rxerrors_byte[sizeof(radio_status_rxerrors_val)];
 unsigned char radio_status_fixed_byte[sizeof(radio_status_fixed_val)];
 
+/******************************* HOME POSITION *********************************************************/
 #define HOME_POSITION 0x09
 double home_latitude_val;
 double home_longitude_val;
@@ -181,21 +182,29 @@ unsigned char home_latitude_byte[sizeof(home_latitude_val)];
 unsigned char home_longitude_byte[sizeof(home_longitude_val)];
 unsigned char home_altitude_byte[sizeof(home_altitude_val)];
 
-int home_latitude_val_rcv;
-int home_longitude_val_rcv;
-int home_altitude_val_rcv;
-
-unsigned char home_latitude_byte_rcv[sizeof(home_latitude_val_rcv)];
-unsigned char home_longitude_byte_rcv[sizeof(home_longitude_val_rcv)];
-unsigned char home_altitude_byte_rcv[sizeof(home_altitude_val_rcv)];
 
 int flag_read_home_position = 0;
 int flag_write_home_position = 0;
 
 int flag_read_home_position_ready = 0;
-int flag_write_home_position_ready = 0;
 
 unsigned char flag_read_home_position_ready_byte[sizeof(flag_read_home_position_ready)];
+
+/******************************* HOME POSITION TO WRITE *********************************************************/
+double home_latitude_val_rcv;
+double home_longitude_val_rcv;
+float home_altitude_val_rcv;
+
+unsigned char home_latitude_byte_rcv[sizeof(home_latitude_val_rcv)];
+unsigned char home_longitude_byte_rcv[sizeof(home_longitude_val_rcv)];
+unsigned char home_altitude_byte_rcv[sizeof(home_altitude_val_rcv)];
+
+// RX flag
+int flag_write_new_home_position = 0;
+// TX flag
+int flag_write_home_position_ready = 0;
+
+unsigned char flag_write_new_home_position_byte[sizeof(flag_write_new_home_position)];
 unsigned char flag_write_home_position_ready_byte[sizeof(flag_write_home_position_ready)];
 
 struct Packet
@@ -333,6 +342,8 @@ void mavlink_message_callback(const mavlink_message_t &msg)
 
 struct timeval tv;
 
+static bool writeHomePosition(MavlinkPassthrough &mavlink_passthrough);
+
 int main(int argc, char **argv)
 {
   int cliSockDes, readStatus;
@@ -406,8 +417,6 @@ int main(int argc, char **argv)
   // roll, pitch & yaw
   mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_ATTITUDE, mavlink_message_callback);
 
-  //mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_HOME_POSITION, mavlink_message_callback);
-
   // todo research & test with GPS signal
   // https://mavsdk.mavlink.io/v2.0/en/cpp/api_reference/structmavsdk_1_1_telemetry_1_1_health.html#mavsdktelemetryhealth-struct-reference
   telemetry->subscribe_health_all_ok([](bool health_all_ok) {
@@ -470,34 +479,6 @@ int main(int argc, char **argv)
         // flag_read_home_position_ready.store(true, std::memory_order_release);
         flag_read_home_position_ready = 1;
     });
-
-
-  if(flag_write_home_position) {
-
-  mavsdk::MavlinkPassthrough::CommandLong set_pos_cmd = {
-        mavlink_passthrough->get_target_sysid(),
-        mavlink_passthrough->get_target_compid(),
-        MAV_CMD_DO_SET_HOME,
-        MAV_FRAME_GLOBAL,
-        0,
-        0,
-        0,
-        49.74637,
-        24.23790,
-        262.7,
-    };
-
-    MavlinkPassthrough::Result mavlink_result = mavlink_passthrough->send_command_long(set_pos_cmd);
-
-    if (mavlink_result == MavlinkPassthrough::Result::Success)
-    {
-        std::cout << "Write home position command successfully send" << std::endl;
-    }
-    else
-    {
-        std::cout << "Write home position command don`t send " << mavlink_result << std::endl;
-    }
-  }
 
   // flight mode
   telemetry->subscribe_flight_mode([](Telemetry::FlightMode flight_mode)
@@ -759,7 +740,9 @@ int main(int argc, char **argv)
     memcpy(home_longitude_byte, &home_longitude_val, sizeof(double));
     memcpy(home_altitude_byte, &home_altitude_val, sizeof(float));
 
+    // home position read result
     memcpy(flag_read_home_position_ready_byte, &flag_read_home_position_ready, sizeof(int));
+    // home position write result
     memcpy(flag_write_home_position_ready_byte, &flag_write_home_position_ready, sizeof(int));
 
     // Set to buf
@@ -940,7 +923,7 @@ int main(int argc, char **argv)
 
     // Set CRC to buf
     packet.data[PACKET_SIZE - 2] = (char)(packet.crc16 & 0xFF);
-    packet.data[PACKET_SIZE - 1] = (char)((packet.crc16 >> 8) & 0xFF);
+    packet.data[PACKET_SIZE - 1] = (char)((packet.crc16 >> 8) & 0xFF); 
 
     // Send
     if (sendto(cliSockDes, packet.data, sizeof(packet.data), 0,
@@ -949,6 +932,12 @@ int main(int argc, char **argv)
       perror("sending error...\n");
       // close(cliSockDes);
       // exit(-1);
+    } else {
+      if (flag_write_home_position_ready) {
+        // reset flag
+        
+        flag_write_home_position_ready = 0;
+      }
     }
 
     // Read
@@ -977,10 +966,41 @@ int main(int argc, char **argv)
 
     packetRX.data[8];
     packetRX.data[9];
+    
+    /******************************* RECEIVED HOME POSITION TO WRITE */
+    flag_write_new_home_position_byte[0] = packetRX.data[10];
+    flag_write_new_home_position_byte[1] = packetRX.data[11];
+    flag_write_new_home_position_byte[2] = packetRX.data[12];
+    flag_write_new_home_position_byte[3] = packetRX.data[13];
+
+    home_latitude_byte_rcv[0] = packetRX.data[14];
+    home_latitude_byte_rcv[1] = packetRX.data[15];
+    home_latitude_byte_rcv[2] = packetRX.data[16];
+    home_latitude_byte_rcv[3] = packetRX.data[17];
+    home_latitude_byte_rcv[4] = packetRX.data[18];
+    home_latitude_byte_rcv[5] = packetRX.data[19];
+    home_latitude_byte_rcv[6] = packetRX.data[20];
+    home_latitude_byte_rcv[7] = packetRX.data[21];
+
+    home_longitude_byte_rcv[0] = packetRX.data[22];
+    home_longitude_byte_rcv[1] = packetRX.data[23];
+    home_longitude_byte_rcv[2] = packetRX.data[24];
+    home_longitude_byte_rcv[3] = packetRX.data[25];
+    home_longitude_byte_rcv[4] = packetRX.data[26];
+    home_longitude_byte_rcv[5] = packetRX.data[27];
+    home_longitude_byte_rcv[6] = packetRX.data[28];
+    home_longitude_byte_rcv[7] = packetRX.data[29];
+
+    home_altitude_byte_rcv[0] = packetRX.data[30];
+    home_altitude_byte_rcv[1] = packetRX.data[31];
+    home_altitude_byte_rcv[2] = packetRX.data[32];
+    home_altitude_byte_rcv[3] = packetRX.data[33];
+
+
 
     // Set CRC to buf
-    crc_buf[0] = packet.data[10];
-    crc_buf[1] = packet.data[11];
+    crc_buf[0] = packet.data[PACKET_SIZE_RX - 2];
+    crc_buf[1] = packet.data[PACKET_SIZE_RX - 1];
 
     uint8_t status = crc_check_16bites(crc_buf, sizeof(crc_buf), &result);
 
@@ -1008,6 +1028,13 @@ int main(int argc, char **argv)
     std::cout << " Home alt " << home_altitude_val_rcv << std::endl;
 
 #endif
+
+    /*********************************************** HOME POSITION TO WRITE */
+    memcpy(&flag_write_new_home_position, flag_write_new_home_position_byte, sizeof(int));  // test
+
+    memcpy(&home_latitude_val_rcv, home_latitude_byte_rcv, sizeof(double));
+    memcpy(&home_longitude_val_rcv, home_longitude_byte_rcv, sizeof(double));
+    memcpy(&home_altitude_val_rcv, home_altitude_byte_rcv, sizeof(float));
 
     if (packetRX.data[6] == 0x67)
     {
@@ -1044,9 +1071,50 @@ int main(int argc, char **argv)
     {
       flag_write_param = 0;
     }
+
+    /*********************************** WRITE HOME POSITION */
+    if (flag_write_new_home_position)
+    {
+      std::cout << "__________________Write home position::" << flag_write_new_home_position << std::endl;
+      if (writeHomePosition(*mavlink_passthrough)) {
+        flag_write_new_home_position = 0;
+        flag_write_home_position_ready = 1;
+      }
+    }
+
   }
 
   close(cliSockDes);
 
   return 0;
+}
+
+
+bool writeHomePosition(mavsdk::MavlinkPassthrough &mavlink_passthrough) {
+  
+  mavsdk::MavlinkPassthrough::CommandLong set_pos_cmd = {
+        mavlink_passthrough.get_target_sysid(),
+        mavlink_passthrough.get_target_compid(),
+        MAV_CMD_DO_SET_HOME,
+        MAV_FRAME_GLOBAL,
+        0,
+        0,
+        0,
+        home_latitude_val_rcv,
+        home_longitude_val_rcv,
+        home_altitude_val_rcv
+    };
+
+    MavlinkPassthrough::Result mavlink_result = mavlink_passthrough.send_command_long(set_pos_cmd);
+
+    if (mavlink_result == MavlinkPassthrough::Result::Success)
+    {
+        std::cout << "Write home position command successfully send" << std::endl;
+    }
+    else
+    {
+        std::cout << "Write home position command don`t send " << mavlink_result << std::endl;
+    }
+
+    return mavlink_result == MavlinkPassthrough::Result::Success;
 }
