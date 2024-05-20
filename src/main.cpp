@@ -22,8 +22,9 @@
 #include "autopilot_mission.h"
 #include "autopilot_params.h"
 
-// #include <functional>
+//
 #include <mavsdk/plugins/ftp/ftp.h>
+#include <mavsdk/plugins/action/action.h>
 
 using namespace mavsdk;
 
@@ -35,7 +36,7 @@ using namespace mavsdk;
 
 #define PACKET_SIZE 132
 
-#define PACKET_SIZE_RX 36
+#define PACKET_SIZE_RX 39
 
 // dev
 #define DIR_NAME "/data/"
@@ -207,6 +208,15 @@ int flag_write_home_position_ready = 0;
 unsigned char flag_write_new_home_position_byte[sizeof(flag_write_new_home_position)];
 unsigned char flag_write_home_position_ready_byte[sizeof(flag_write_home_position_ready)];
 
+/******************************** ACTION TYPES */
+uint8_t flag_action_type = 0;
+#define TAKE_OFF 0x01;
+
+unsigned char flag_action_type_byte[sizeof(flag_action_type)];
+
+uint16_t altitude_takeoff_val = 0;
+unsigned char altitude_takeoff_byte[sizeof(altitude_takeoff_val)];
+
 struct Packet
 {
   unsigned char data[PACKET_SIZE];
@@ -344,6 +354,10 @@ struct timeval tv;
 
 static bool writeHomePosition(MavlinkPassthrough &mavlink_passthrough);
 
+static void proccessAction_Msgs(uint8_t &flag_action, Action &action);
+static void do_takeoff(Action &action, int altitute);
+
+
 int main(int argc, char **argv)
 {
   int cliSockDes, readStatus;
@@ -407,6 +421,10 @@ int main(int argc, char **argv)
   auto telemetry = std::make_shared<Telemetry>(system);
   auto mission_raw = std::make_shared<MissionRaw>(system);
   auto mavlink_passthrough = std::make_shared<MavlinkPassthrough>(system);
+
+  //
+  auto action = std::make_shared<Action>(system);
+  
 
   // heading
   mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_VFR_HUD, mavlink_message_callback);
@@ -586,7 +604,12 @@ int main(int argc, char **argv)
     batt_voltage = battery.voltage_v;
     batt_current = battery.current_battery_a;
     batt_charge = battery.capacity_consumed_ah;
-    batt_remaining = battery.remaining_percent; });    
+    batt_remaining = battery.remaining_percent; });   
+
+  // for dev
+  // telemetry->subscribe_armed([](bool armed) {
+  //   std::cout << "Armed: " << armed << std::endl; 
+  // });
 
   while (1)
   {
@@ -996,8 +1019,13 @@ int main(int argc, char **argv)
     home_altitude_byte_rcv[2] = packetRX.data[32];
     home_altitude_byte_rcv[3] = packetRX.data[33];
 
+    /********************************* TAKE OF */
+    flag_action_type_byte[0] = packetRX.data[34];
 
+    altitude_takeoff_byte[0] = packetRX.data[35];
+    altitude_takeoff_byte[1] = packetRX.data[36];
 
+    
     // Set CRC to buf
     crc_buf[0] = packet.data[PACKET_SIZE_RX - 2];
     crc_buf[1] = packet.data[PACKET_SIZE_RX - 1];
@@ -1035,6 +1063,12 @@ int main(int argc, char **argv)
     memcpy(&home_latitude_val_rcv, home_latitude_byte_rcv, sizeof(double));
     memcpy(&home_longitude_val_rcv, home_longitude_byte_rcv, sizeof(double));
     memcpy(&home_altitude_val_rcv, home_altitude_byte_rcv, sizeof(float));
+
+    /*********************************************** TAKE OFF */
+    memcpy(&flag_action_type, flag_action_type_byte, sizeof(int));
+
+    // todo add condition
+    memcpy(&altitude_takeoff_val, altitude_takeoff_byte, sizeof(float));
 
     if (packetRX.data[6] == 0x67)
     {
@@ -1082,6 +1116,26 @@ int main(int argc, char **argv)
       }
     }
 
+    /*********************************** TAKE OFF */
+    if (flag_action_type != 0)
+    {
+      std::cout << "__________________ACTION::" << (int)flag_action_type << std::endl;
+      switch (flag_action_type)
+      {
+        case 1:
+        {
+          std::cout << "__________________Take off::" << (int)flag_action_type << std::endl;
+          do_takeoff(*action, 100.0);
+          break;
+        }
+
+        default: {
+          std::cout << "__________________ACTION(def)::" << (int)flag_action_type << std::endl;
+          break;
+        }
+      }
+
+    }
   }
 
   close(cliSockDes);
@@ -1118,3 +1172,33 @@ bool writeHomePosition(mavsdk::MavlinkPassthrough &mavlink_passthrough) {
 
     return mavlink_result == MavlinkPassthrough::Result::Success;
 }
+
+//  todo add return result
+void do_takeoff(Action &action, int altitute) {
+  std::cout << "Arming...\n";
+  const Action::Result arm_result = action.arm();
+
+  // if (arm_result != Action::Result::Success) {
+  //     std::cerr << "Arming failed: " << arm_result << '\n';
+  //     return;
+  // } else {
+  //     std::cout << "Arming success" << std::endl;
+  // }
+
+    mavsdk::Action::Result result_takeoff_alt = action.set_takeoff_altitude(100.0);
+
+  if (result_takeoff_alt == mavsdk::Action::Result::Success) {
+    std::cout << "Takeoff altitude::Success" << std::endl;
+  } else {
+    std::cout << "Takeoff altitude command don`t send " << result_takeoff_alt << std::endl;
+  }
+
+  // Take off
+  std::cout << "Taking off...\n";
+  const Action::Result takeoff_result = action.takeoff();
+  if (takeoff_result != Action::Result::Success) {
+      std::cerr << "Takeoff failed: " << takeoff_result << '\n';
+  } else {
+      std::cout << "Takeoff success" << std::endl;
+  }
+};
