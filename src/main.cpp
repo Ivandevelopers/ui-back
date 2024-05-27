@@ -34,7 +34,7 @@ using namespace mavsdk;
 
 #define CONNECTION_PORT "udp://:14552" // 14552
 
-#define PACKET_SIZE 132
+#define PACKET_SIZE 133
 
 #define PACKET_SIZE_RX 39
 
@@ -172,6 +172,10 @@ unsigned char radio_status_noise_byte[sizeof(radio_status_noise_val)];
 unsigned char radio_status_remnoise_byte[sizeof(radio_status_remnoise_val)];
 unsigned char radio_status_rxerrors_byte[sizeof(radio_status_rxerrors_val)];
 unsigned char radio_status_fixed_byte[sizeof(radio_status_fixed_val)];
+
+/******************************* ARMED STATUS *********************************************************/
+bool armed_status_val = 0;
+unsigned char armed_status_byte[sizeof(armed_status_val)];
 
 /******************************* HOME POSITION *********************************************************/
 #define HOME_POSITION 0x09
@@ -322,7 +326,7 @@ void mavlink_message_callback(const mavlink_message_t &msg)
     std::cout << "Fixed: " << static_cast<unsigned int>(radio_status.fixed) << std::endl;
 #endif
 
-    radio_status_rssi_val = radio_status.rssi;
+    // radio_status_rssi_val = radio_status.rssi;
     radio_status_remrssi_val = radio_status.remrssi;
     radio_status_txbuf_val = radio_status.txbuf;
     radio_status_noise_val = radio_status.noise;
@@ -408,10 +412,8 @@ int main(int argc, char **argv)
 
   fut.wait();
 
-  std::cout << "connection_result" << connection_result << std::endl;
+  std::cout << "connection_result::" << connection_result << std::endl;
   auto system = fut.get();
-  // std::cout << "system fut.get" << system << std::endl;
-  // auto system = mavsdk->first_autopilot(3.0);
 
   system->subscribe_is_connected([](bool is_connected) {
       connection_status_val = is_connected;
@@ -435,13 +437,31 @@ int main(int argc, char **argv)
   // roll, pitch & yaw
   mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_ATTITUDE, mavlink_message_callback);
 
-  // todo research & test with GPS signal
-  // https://mavsdk.mavlink.io/v2.0/en/cpp/api_reference/structmavsdk_1_1_telemetry_1_1_health.html#mavsdktelemetryhealth-struct-reference
-  telemetry->subscribe_health_all_ok([](bool health_all_ok) {
-    ready_to_fly_val = health_all_ok;
+  telemetry->subscribe_rc_status([](Telemetry::RcStatus rc_status)
+    {
+      radio_status_rssi_val = rc_status.signal_strength_percent;
+    });
+
+  telemetry->subscribe_armed([](bool armed) {
+    // if (DEBUG) {
+    //   std::cout << "Armed: " << armed << std::endl; 
+    // }
+    armed_status_val = armed;
+  });
+  //---------------------------------
+
+
+  telemetry->subscribe_health([](Telemetry::Health health) {
 #if defined(DEBUG)
-    std::cout << "Systme all healths stus: " << health_all_ok << std::endl;
+    std::cout << "________ is_accelerometer_calibration_ok: " << health.is_accelerometer_calibration_ok <<
+                 "\n_______ is_armable: " << health.is_armable <<
+                 "\n_______ is_global_position_ok: " << health.is_global_position_ok <<
+                  "\n_______ is_gyrometer_calibration_ok: " << health.is_gyrometer_calibration_ok <<
+                  "\n_______ is_home_position_ok: " << health.is_home_position_ok <<
+                  "\n_______ is_local_position_ok: " << health.is_local_position_ok <<
+                  "\n_______ is_magnetometer_calibration_ok: " << health.is_magnetometer_calibration_ok << "\n" << std::endl;
 #endif
+    ready_to_fly_val = health.is_armable;
   });
 
   // altitude & gps (long, lat)
@@ -606,11 +626,6 @@ int main(int argc, char **argv)
     batt_charge = battery.capacity_consumed_ah;
     batt_remaining = battery.remaining_percent; });   
 
-  // for dev
-  // telemetry->subscribe_armed([](bool armed) {
-  //   std::cout << "Armed: " << armed << std::endl; 
-  // });
-
   while (1)
   {
 
@@ -703,8 +718,6 @@ int main(int argc, char **argv)
     memcpy(gps_vdop_byte, &gps_vdop_val, sizeof(float));
     memcpy(gps_num_satellites_byte, &gps_num_satellites_val, sizeof(int));
 
-    // std::cout << " alt asl" << gps_alt_amsl_val << " alt rel" << gps_alt_rel_val << std::endl;
-
     // #define VELOCITY_MESSAGE 0x02
     memcpy(velocity_north_byte, &velocity_north_direction, sizeof(float));
     memcpy(velocity_east_byte, &velocity_east_direction, sizeof(float));
@@ -767,6 +780,9 @@ int main(int argc, char **argv)
     memcpy(flag_read_home_position_ready_byte, &flag_read_home_position_ready, sizeof(int));
     // home position write result
     memcpy(flag_write_home_position_ready_byte, &flag_write_home_position_ready, sizeof(int));
+
+    /**************************************** ARMED STATUS */
+    memcpy(armed_status_byte, &armed_status_val, sizeof(bool));
 
     // Set to buf
     packet.data[0] = 0x55; // STX  starting mark Low byte in the front
@@ -844,7 +860,8 @@ int main(int argc, char **argv)
     packet.data[59] = imu_roll_byte[1];
     packet.data[60] = imu_roll_byte[2];
     packet.data[61] = imu_roll_byte[3];
-    //////////////////////////////////////////////////////////////////////////
+    
+    /************************ BATTERY STATUS */
     packet.data[62] = batt_voltage_byte[0];
     packet.data[63] = batt_voltage_byte[1];
     packet.data[64] = batt_voltage_byte[2];
@@ -865,21 +882,26 @@ int main(int argc, char **argv)
     packet.data[76] = batt_remaining_byte[2];
     packet.data[77] = batt_remaining_byte[3];
 
+    /************************** CONNECTION STATUS */
     packet.data[78] = connection_status_byte[0];
     packet.data[79] = connection_status_byte[1];
     packet.data[80] = connection_status_byte[2];
     packet.data[81] = connection_status_byte[3];
 
+    /************************** FLIGHT MODE */
     packet.data[82] = flight_mode_byte[0];
     packet.data[83] = flight_mode_byte[1];
     packet.data[84] = flight_mode_byte[2];
     packet.data[85] = flight_mode_byte[3];
 
+    /************************** READY TO FLY STATUS */
     packet.data[86] = ready_to_fly_byte[0];
 
+    /*************************** AZIMUTH */
     packet.data[87] = compass_azimuth_byte[0];
     packet.data[88] = compass_azimuth_byte[1];
 
+    /*************************** RADIO STATUS */
     packet.data[89] = radio_status_rssi_byte[0];
     packet.data[90] = radio_status_remrssi_byte[0];
     packet.data[91] = radio_status_txbuf_byte[0];
@@ -893,12 +915,12 @@ int main(int argc, char **argv)
     packet.data[96] = radio_status_fixed_byte[0];
     packet.data[97] = radio_status_fixed_byte[1];
 
+    /*************************** WAYPOINT */
     packet.data[98] = flag_read_waypoint_ready_byte[0];
-
     packet.data[99] = flag_write_waypoint_ready_byte[0];
 
+    /*************************** Params */
     packet.data[100] = flag_read_param_ready_byte[0];
-
     packet.data[101] = flag_write_param_ready_byte[0];
 
     /*************************** HOME POSITION */
@@ -937,9 +959,12 @@ int main(int argc, char **argv)
     packet.data[128] = flag_write_home_position_ready_byte[2];
     packet.data[129] = flag_write_home_position_ready_byte[3];
 
+    /****************************** ARMED STATUS */
+    packet.data[130] = armed_status_byte[0];
+
     //////////////////////////////////////////////////////////////////////////
-    packet.data[130] = 0x03;
-    packet.data[131] = 0x07;
+    packet.data[131] = 0x03;
+    packet.data[132] = 0x07;
 
     // Calc to CRC16
     packet.crc16 = CRC16_cal(packet.data, PACKET_SIZE - 2, *crc16_tab);
