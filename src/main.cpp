@@ -1200,8 +1200,8 @@ bool writeHomePosition(mavsdk::MavlinkPassthrough &mavlink_passthrough) {
 
 //  todo add return result
 void do_takeoff(Action &action, int altitute) {
-  std::cout << "Arming...\n";
-  const Action::Result arm_result = action.arm();
+  // std::cout << "Arming...\n";
+  // const Action::Result arm_result = action.arm();
 
   // if (arm_result != Action::Result::Success) {
   //     std::cerr << "Arming failed: " << arm_result << '\n';
