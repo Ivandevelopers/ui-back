@@ -35,7 +35,7 @@ using namespace mavsdk;
 
 #define CONNECTION_PORT "udp://:14550" // 14552
 
-#define PACKET_SIZE 132
+#define PACKET_SIZE 165
 
 #define PACKET_SIZE_RX 36
 
