@@ -10,6 +10,8 @@
 
 #include <mavsdk/plugins/mavlink_passthrough/mavlink_passthrough.h>
 
+#include <mavsdk/plugins/ftp/ftp.h>
+
 #include <mavsdk/mavsdk.h>
 
 #include <arpa/inet.h>
@@ -27,11 +29,11 @@
 
 using namespace mavsdk;
 
-// #define DEBUG
+#define DEBUG
 
 #define PORT 10000
 
-#define CONNECTION_PORT "udp://:14552" // 14552
+#define CONNECTION_PORT "udp://:14550" // 14552
 
 #define PACKET_SIZE 132
 
@@ -207,6 +209,42 @@ int flag_write_home_position_ready = 0;
 unsigned char flag_write_new_home_position_byte[sizeof(flag_write_new_home_position)];
 unsigned char flag_write_home_position_ready_byte[sizeof(flag_write_home_position_ready)];
 
+//RC Channels
+uint16_t rc_channel_1_raw;
+uint16_t rc_channel_2_raw;
+uint16_t rc_channel_3_raw;
+uint16_t rc_channel_4_raw;
+uint16_t rc_channel_5_raw;
+uint16_t rc_channel_6_raw;
+uint16_t rc_channel_7_raw;
+uint16_t rc_channel_8_raw;
+uint16_t rc_channel_9_raw;
+uint16_t rc_channel_10_raw;
+uint16_t rc_channel_11_raw;
+uint16_t rc_channel_12_raw;
+uint16_t rc_channel_13_raw;
+uint16_t rc_channel_14_raw;
+uint16_t rc_channel_15_raw;
+uint16_t rc_channel_16_raw;
+
+unsigned char rc_channel_1_raw_byte[sizeof(rc_channel_1_raw)];
+unsigned char rc_channel_2_raw_byte[sizeof(rc_channel_2_raw)];
+unsigned char rc_channel_3_raw_byte[sizeof(rc_channel_3_raw)];
+unsigned char rc_channel_4_raw_byte[sizeof(rc_channel_4_raw)];
+unsigned char rc_channel_5_raw_byte[sizeof(rc_channel_5_raw)];
+unsigned char rc_channel_6_raw_byte[sizeof(rc_channel_6_raw)];
+unsigned char rc_channel_7_raw_byte[sizeof(rc_channel_7_raw)];
+unsigned char rc_channel_8_raw_byte[sizeof(rc_channel_8_raw)];
+unsigned char rc_channel_9_raw_byte[sizeof(rc_channel_9_raw)];
+unsigned char rc_channel_10_raw_byte[sizeof(rc_channel_10_raw)];
+unsigned char rc_channel_11_raw_byte[sizeof(rc_channel_11_raw)];
+unsigned char rc_channel_12_raw_byte[sizeof(rc_channel_12_raw)];
+unsigned char rc_channel_13_raw_byte[sizeof(rc_channel_13_raw)];
+unsigned char rc_channel_14_raw_byte[sizeof(rc_channel_14_raw)];
+unsigned char rc_channel_15_raw_byte[sizeof(rc_channel_15_raw)];
+unsigned char rc_channel_16_raw_byte[sizeof(rc_channel_16_raw)];
+
+
 struct Packet
 {
   unsigned char data[PACKET_SIZE];
@@ -337,6 +375,48 @@ void mavlink_message_callback(const mavlink_message_t &msg)
         imu_pitch_val = attitude.pitch;
         imu_yaw_val = attitude.yaw;
         }
+
+   case MAVLINK_MSG_ID_RC_CHANNELS:
+  {
+    mavlink_rc_channels_t rc_channels;
+    mavlink_msg_rc_channels_decode(&msg, &rc_channels);
+
+#if defined(DEBUG)
+    std::cout << "RC Channel 1: " << rc_channels.chan1_raw << std::endl;
+    std::cout << "RC Channel 2: " << rc_channels.chan2_raw<< std::endl;
+    std::cout << "RC Channel 3: " << rc_channels.chan3_raw<< std::endl;
+    std::cout << "RC Channel 4: " << rc_channels.chan4_raw<< std::endl;
+    std::cout << "RC Channel 5: " << rc_channels.chan5_raw<< std::endl;
+    std::cout << "RC Channel 6: " << rc_channels.chan6_raw<< std::endl;
+    std::cout << "RC Channel 7: " << rc_channels.chan7_raw<< std::endl;
+    std::cout << "RC Channel 8: " << rc_channels.chan8_raw<< std::endl;
+    std::cout << "RC Channel 9: " << rc_channels.chan9_raw<< std::endl;
+    std::cout << "RC Channel 10: " << rc_channels.chan10_raw<< std::endl;
+    std::cout << "RC Channel 11: " << rc_channels.chan11_raw<< std::endl;
+    std::cout << "RC Channel 12: " << rc_channels.chan12_raw<< std::endl;
+    std::cout << "RC Channel 13: " << rc_channels.chan13_raw<< std::endl;
+    std::cout << "RC Channel 14: " << rc_channels.chan14_raw<< std::endl;
+    std::cout << "RC Channel 15: " << rc_channels.chan15_raw<< std::endl;
+    std::cout << "RC Channel 16: " << rc_channels.chan16_raw<< std::endl;
+#endif
+
+        rc_channel_1_raw = rc_channels.chan1_raw;
+        rc_channel_2_raw = rc_channels.chan2_raw;
+        rc_channel_3_raw = rc_channels.chan3_raw;
+        rc_channel_4_raw = rc_channels.chan4_raw;
+        rc_channel_5_raw = rc_channels.chan5_raw;
+        rc_channel_6_raw = rc_channels.chan6_raw;
+        rc_channel_7_raw = rc_channels.chan7_raw;
+        rc_channel_8_raw = rc_channels.chan8_raw;
+        rc_channel_9_raw = rc_channels.chan9_raw;
+        rc_channel_10_raw = rc_channels.chan10_raw;
+        rc_channel_11_raw = rc_channels.chan11_raw;
+        rc_channel_12_raw = rc_channels.chan12_raw;
+        rc_channel_13_raw = rc_channels.chan13_raw;
+        rc_channel_14_raw = rc_channels.chan14_raw;
+        rc_channel_15_raw = rc_channels.chan15_raw;
+        rc_channel_16_raw = rc_channels.chan16_raw;
+        }
     }
 }
 
@@ -404,6 +484,7 @@ int main(int argc, char **argv)
   });
 
   auto param = std::make_shared<Param>(system);
+  auto ftp = std::make_shared<Ftp>(system);
   auto telemetry = std::make_shared<Telemetry>(system);
   auto mission_raw = std::make_shared<MissionRaw>(system);
   auto mavlink_passthrough = std::make_shared<MavlinkPassthrough>(system);
@@ -425,6 +506,55 @@ int main(int argc, char **argv)
     std::cout << "Systme all healths stus: " << health_all_ok << std::endl;
 #endif
   });
+
+ 
+//   mavlink_message_t message;
+
+// uint8_t target_system = mavlink_passthrough->get_target_sysid();
+// uint8_t target_component = mavlink_passthrough->get_target_compid();
+
+// uint8_t system_id = mavlink_passthrough->get_our_sysid();
+// uint8_t component_id = mavlink_passthrough->get_our_compid();
+
+// mavlink_command_long_t command;
+// command.target_system = target_system;
+// command.target_component = target_component;
+// command.command = MAV_CMD_PREFLIGHT_CALIBRATION;
+// command.confirmation = 0;
+// command.param1 = 0.0; // Gyro calibration
+// command.param2 = 0.0;
+// command.param3 = 0.0;
+// command.param4 = 0.0;
+// command.param5 = 0.0;
+// command.param6 = 0.0;
+// command.param7 = 1.0; // Accelerometer calibration
+
+// std::cout << "Acc " << std::endl;
+
+// mavlink_msg_command_long_encode(system_id, component_id, &message, &command);
+
+// mavlink_command_ack_t ack;
+// ack.command = MAV_CMD_PREFLIGHT_CALIBRATION;
+// ack.result = MAV_RESULT_ACCEPTED; 
+
+// mavlink_msg_command_ack_pack(system_id, component_id, &message, target_system, target_component, ack.command, ack.result, 0, 0);
+
+// mavlink_command_ack_t commandAck;
+// mavlink_msg_command_ack_decode(&message, &commandAck);
+
+// if (commandAck.command == MAV_CMD_PREFLIGHT_CALIBRATION) {
+//     switch (commandAck.result) {
+//         case MAV_RESULT_IN_PROGRESS:
+//             std::cout << "Calibration in progress..." << std::endl;
+//             break;
+//         case MAV_RESULT_ACCEPTED:
+//             std::cout << "Accelerometer calibration successfully completed." << std::endl;
+//             break;
+//         default:
+//             std::cout << "Accelerometer calibration failed." << std::endl;
+//             break;
+//     }
+// }
 
   // altitude & gps (long, lat)
   telemetry->subscribe_position([](Telemetry::Position position)
@@ -914,9 +1044,57 @@ int main(int argc, char **argv)
     packet.data[128] = flag_write_home_position_ready_byte[2];
     packet.data[129] = flag_write_home_position_ready_byte[3];
 
+    packet.data[130] = rc_channel_1_raw_byte[0];
+    packet.data[131] = rc_channel_1_raw_byte[1];
+    
+    packet.data[132] = rc_channel_2_raw_byte[0];
+    packet.data[133] = rc_channel_2_raw_byte[1];
+
+    packet.data[134] = rc_channel_3_raw_byte[0];
+    packet.data[135] = rc_channel_3_raw_byte[1];
+
+    packet.data[136] = rc_channel_4_raw_byte[0];
+    packet.data[137] = rc_channel_4_raw_byte[1];
+
+    packet.data[138] = rc_channel_5_raw_byte[0];
+    packet.data[139] = rc_channel_5_raw_byte[1];
+
+    packet.data[140] = rc_channel_6_raw_byte[0];
+    packet.data[141] = rc_channel_6_raw_byte[1];
+
+    packet.data[142] = rc_channel_7_raw_byte[0];
+    packet.data[143] = rc_channel_7_raw_byte[1];
+
+    packet.data[144] = rc_channel_8_raw_byte[0];
+    packet.data[145] = rc_channel_8_raw_byte[1];
+
+    packet.data[146] = rc_channel_9_raw_byte[0];
+    packet.data[147] = rc_channel_9_raw_byte[1];
+
+    packet.data[148] = rc_channel_10_raw_byte[0];
+    packet.data[149] = rc_channel_10_raw_byte[1];
+
+    packet.data[150] = rc_channel_11_raw_byte[0];
+    packet.data[151] = rc_channel_11_raw_byte[1];
+
+    packet.data[152] = rc_channel_12_raw_byte[0];
+    packet.data[153] = rc_channel_12_raw_byte[1];
+
+    packet.data[154] = rc_channel_13_raw_byte[0];
+    packet.data[155] = rc_channel_13_raw_byte[1];
+
+    packet.data[156] = rc_channel_14_raw_byte[0];
+    packet.data[157] = rc_channel_14_raw_byte[1];
+
+    packet.data[158] = rc_channel_15_raw_byte[0];
+    packet.data[159] = rc_channel_15_raw_byte[1];
+
+    packet.data[160] = rc_channel_16_raw_byte[0];
+    packet.data[161] = rc_channel_16_raw_byte[1];
+
     //////////////////////////////////////////////////////////////////////////
-    packet.data[130] = 0x03;
-    packet.data[131] = 0x07;
+    packet.data[162] = 0x03;
+    packet.data[163] = 0x07;
 
     // Calc to CRC16
     packet.crc16 = CRC16_cal(packet.data, PACKET_SIZE - 2, *crc16_tab);
@@ -995,8 +1173,6 @@ int main(int argc, char **argv)
     home_altitude_byte_rcv[1] = packetRX.data[31];
     home_altitude_byte_rcv[2] = packetRX.data[32];
     home_altitude_byte_rcv[3] = packetRX.data[33];
-
-
 
     // Set CRC to buf
     crc_buf[0] = packet.data[PACKET_SIZE_RX - 2];
