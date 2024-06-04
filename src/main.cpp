@@ -617,82 +617,23 @@ int main(int argc, char **argv)
 #endif
   });
 
-  Param::Result set_parameter_result = param->set_param_float("ATC_ACCEL_P_MAX", 0.0);
+   // altitude & gps (long, lat)
+  telemetry->subscribe_position([](Telemetry::Position position)
+                                {
+#if defined(DEBUG)
+                                  std::cout << "Altitude & GPS (long, lat)" << std::endl;
+                                  std::cout << "Altitude AMSL (above mean sea level) in metres: " << position.absolute_altitude_m
+                                            << " Altitude relative to takeoff altitude in metres: " << position.relative_altitude_m
+                                            << " Latitude: " << position.latitude_deg
+                                            << " Longitude: " << position.longitude_deg << std::endl;
+                                  std::cout << " alt asl" << gps_alt_amsl_val << " alt rel" << gps_alt_rel_val << std::endl;
+#endif
 
-  if (set_parameter_result == Param::Result::Success) {
-    std::cout << "ACCEL PARAM WRITE" << std::endl;
-  }
-  else {
-    std::cout << "ACCEL PARAM NOT WRITE" << std::endl;
-  }
-
- 
-//   mavlink_message_t message;
-
-// uint8_t target_system = mavlink_passthrough->get_target_sysid();
-// uint8_t target_component = mavlink_passthrough->get_target_compid();
-
-// uint8_t system_id = mavlink_passthrough->get_our_sysid();
-// uint8_t component_id = mavlink_passthrough->get_our_compid();
-
-// mavlink_command_long_t command;
-// command.target_system = target_system;
-// command.target_component = target_component;
-// command.command = MAV_CMD_PREFLIGHT_CALIBRATION;
-// command.confirmation = 0;
-// command.param1 = 0.0; // Gyro calibration
-// command.param2 = 0.0;
-// command.param3 = 0.0;
-// command.param4 = 0.0;
-// command.param5 = 0.0;
-// command.param6 = 0.0;
-// command.param7 = 1.0; // Accelerometer calibration
-
-// std::cout << "Acc " << std::endl;
-
-// mavlink_msg_command_long_encode(system_id, component_id, &message, &command);
-
-// mavlink_command_ack_t ack;
-// ack.command = MAV_CMD_PREFLIGHT_CALIBRATION;
-// ack.result = MAV_RESULT_ACCEPTED; 
-
-// mavlink_msg_command_ack_pack(system_id, component_id, &message, target_system, target_component, ack.command, ack.result, 0, 0);
-
-// mavlink_command_ack_t commandAck;
-// mavlink_msg_command_ack_decode(&message, &commandAck);
-
-// if (commandAck.command == MAV_CMD_PREFLIGHT_CALIBRATION) {
-//     switch (commandAck.result) {
-//         case MAV_RESULT_IN_PROGRESS:
-//             std::cout << "Calibration in progress..." << std::endl;
-//             break;
-//         case MAV_RESULT_ACCEPTED:
-//             std::cout << "Accelerometer calibration successfully completed." << std::endl;
-//             break;
-//         default:
-//             std::cout << "Accelerometer calibration failed." << std::endl;
-//             break;
-//     }
-// }
-
-//   send_param_map_rc(*mavlink_passthrough, "THR_MIN", 5, 100.0f, 1000.0f);
-//   // altitude & gps (long, lat)
-//   telemetry->subscribe_position([](Telemetry::Position position)
-//                                 {
-// #if defined(DEBUG)
-//                                   std::cout << "Altitude & GPS (long, lat)" << std::endl;
-//                                   std::cout << "Altitude AMSL (above mean sea level) in metres: " << position.absolute_altitude_m
-//                                             << " Altitude relative to takeoff altitude in metres: " << position.relative_altitude_m
-//                                             << " Latitude: " << position.latitude_deg
-//                                             << " Longitude: " << position.longitude_deg << std::endl;
-//                                   std::cout << " alt asl" << gps_alt_amsl_val << " alt rel" << gps_alt_rel_val << std::endl;
-// #endif
-
-//                                   gps_alt_amsl_val = position.absolute_altitude_m;
-//                                   gps_alt_rel_val = position.relative_altitude_m;
-//                                   gps_lon_val = position.longitude_deg;
-//                                   gps_lat_val = position.latitude_deg; });
-
+                                  gps_alt_amsl_val = position.absolute_altitude_m;
+                                  gps_alt_rel_val = position.relative_altitude_m;
+                                  gps_lon_val = position.longitude_deg;
+                                  gps_lat_val = position.latitude_deg; });
+                                  
   // gps hdop/vdop
   telemetry->subscribe_raw_gps([](Telemetry::RawGps raw_gps)
                                {
