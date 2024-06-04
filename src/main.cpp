@@ -23,6 +23,7 @@
 
 #include "autopilot_mission.h"
 #include "autopilot_params.h"
+#include <cstring>
 
 // #include <functional>
 #include <mavsdk/plugins/ftp/ftp.h>
@@ -227,6 +228,23 @@ uint16_t rc_channel_14_raw;
 uint16_t rc_channel_15_raw;
 uint16_t rc_channel_16_raw;
 
+uint16_t rc_channel_1_normalized;
+uint16_t rc_channel_2_normalized;
+uint16_t rc_channel_3_normalized;
+uint16_t rc_channel_4_normalized;
+uint16_t rc_channel_5_normalized;
+uint16_t rc_channel_6_normalized;
+uint16_t rc_channel_7_normalized;
+uint16_t rc_channel_8_normalized;
+uint16_t rc_channel_9_normalized;
+uint16_t rc_channel_10_normalized;
+uint16_t rc_channel_11_normalized;
+uint16_t rc_channel_12_normalized;
+uint16_t rc_channel_13_normalized;
+uint16_t rc_channel_14_normalized;
+uint16_t rc_channel_15_normalized;
+uint16_t rc_channel_16_normalized;
+
 unsigned char rc_channel_1_raw_byte[sizeof(rc_channel_1_raw)];
 unsigned char rc_channel_2_raw_byte[sizeof(rc_channel_2_raw)];
 unsigned char rc_channel_3_raw_byte[sizeof(rc_channel_3_raw)];
@@ -244,6 +262,24 @@ unsigned char rc_channel_14_raw_byte[sizeof(rc_channel_14_raw)];
 unsigned char rc_channel_15_raw_byte[sizeof(rc_channel_15_raw)];
 unsigned char rc_channel_16_raw_byte[sizeof(rc_channel_16_raw)];
 
+unsigned char rc_channel_1_normalized_byte[sizeof(rc_channel_1_normalized)];
+unsigned char rc_channel_2_normalized_byte[sizeof(rc_channel_2_normalized)];
+unsigned char rc_channel_3_normalized_byte[sizeof(rc_channel_3_normalized)];
+unsigned char rc_channel_4_normalized_byte[sizeof(rc_channel_4_normalized)];
+unsigned char rc_channel_5_normalized_byte[sizeof(rc_channel_5_normalized)];
+unsigned char rc_channel_6_normalized_byte[sizeof(rc_channel_6_normalized)];
+unsigned char rc_channel_7_normalized_byte[sizeof(rc_channel_7_normalized)];
+unsigned char rc_channel_8_normalized_byte[sizeof(rc_channel_8_normalized)];
+unsigned char rc_channel_9_normalized_byte[sizeof(rc_channel_9_normalized)];
+unsigned char rc_channel_10_normalized_byte[sizeof(rc_channel_10_normalized)];
+unsigned char rc_channel_11_normalized_byte[sizeof(rc_channel_11_normalized)];
+unsigned char rc_channel_12_normalized_byte[sizeof(rc_channel_12_normalized)];
+unsigned char rc_channel_13_normalized_byte[sizeof(rc_channel_13_normalized)];
+unsigned char rc_channel_14_normalized_byte[sizeof(rc_channel_14_normalized)];
+unsigned char rc_channel_15_normalized_byte[sizeof(rc_channel_15_normalized)];
+unsigned char rc_channel_16_normalized_byte[sizeof(rc_channel_16_normalized)];
+
+int flag_start_rc_calibration = 0;
 
 struct Packet
 {
@@ -319,6 +355,43 @@ uint8_t crc_check_16bites(uint8_t *pbuf, uint32_t len, uint32_t *p_result)
   return 2;
 }
 
+void send_param_map_rc(MavlinkPassthrough& mavlink_passthrough, const std::string& param_id, int16_t rc_channel, float min_value, float max_value) {
+    mavlink_message_t message;
+
+    // Створення структури для заповнення параметрів
+    mavlink_param_map_rc_t param_map_rc;
+    strncpy(param_map_rc.param_id, param_id.c_str(), sizeof(param_map_rc.param_id) - 1);
+
+    param_map_rc.target_system = mavlink_passthrough.get_our_sysid();
+    param_map_rc.target_component = mavlink_passthrough.get_our_compid();
+    param_map_rc.param_id[sizeof(param_map_rc.param_id) - 1] = '\0'; // Забезпечення null-термінатора
+
+    param_map_rc.param_index = -1;  // Використовується param_id, а не індекс
+    param_map_rc.parameter_rc_channel_index = rc_channel;
+    param_map_rc.param_value0 = min_value;
+    param_map_rc.scale = (max_value - min_value) / 1000.0f; // Масштабування для діапазону 1000-2000
+    param_map_rc.param_value_min = min_value;
+    param_map_rc.param_value_max = max_value;
+
+    mavlink_msg_param_map_rc_encode(mavlink_passthrough.get_our_sysid(),
+                                    mavlink_passthrough.get_our_compid(),
+                                    &message,
+                                    &param_map_rc);
+
+    mavlink_passthrough.send_message(message);
+}
+
+float normalize_rc_input(int input_value, int input_min, int input_max, float output_min, float output_max) {
+    // Ensure input_value is within the bounds
+    input_value = std::max(input_min, std::min(input_value, input_max));
+
+    // Normalize the input value to a 0 to 1 range
+    float normalized = static_cast<float>(input_value - input_min) / (input_max - input_min);
+
+    // Scale to the output range
+    return output_min + normalized * (output_max - output_min);
+}
+
 void mavlink_message_callback(const mavlink_message_t &msg)
 {
   switch (msg.msgid)
@@ -381,25 +454,6 @@ void mavlink_message_callback(const mavlink_message_t &msg)
     mavlink_rc_channels_t rc_channels;
     mavlink_msg_rc_channels_decode(&msg, &rc_channels);
 
-#if defined(DEBUG)
-    std::cout << "RC Channel 1: " << rc_channels.chan1_raw << std::endl;
-    std::cout << "RC Channel 2: " << rc_channels.chan2_raw<< std::endl;
-    std::cout << "RC Channel 3: " << rc_channels.chan3_raw<< std::endl;
-    std::cout << "RC Channel 4: " << rc_channels.chan4_raw<< std::endl;
-    std::cout << "RC Channel 5: " << rc_channels.chan5_raw<< std::endl;
-    std::cout << "RC Channel 6: " << rc_channels.chan6_raw<< std::endl;
-    std::cout << "RC Channel 7: " << rc_channels.chan7_raw<< std::endl;
-    std::cout << "RC Channel 8: " << rc_channels.chan8_raw<< std::endl;
-    std::cout << "RC Channel 9: " << rc_channels.chan9_raw<< std::endl;
-    std::cout << "RC Channel 10: " << rc_channels.chan10_raw<< std::endl;
-    std::cout << "RC Channel 11: " << rc_channels.chan11_raw<< std::endl;
-    std::cout << "RC Channel 12: " << rc_channels.chan12_raw<< std::endl;
-    std::cout << "RC Channel 13: " << rc_channels.chan13_raw<< std::endl;
-    std::cout << "RC Channel 14: " << rc_channels.chan14_raw<< std::endl;
-    std::cout << "RC Channel 15: " << rc_channels.chan15_raw<< std::endl;
-    std::cout << "RC Channel 16: " << rc_channels.chan16_raw<< std::endl;
-#endif
-
         rc_channel_1_raw = rc_channels.chan1_raw;
         rc_channel_2_raw = rc_channels.chan2_raw;
         rc_channel_3_raw = rc_channels.chan3_raw;
@@ -416,6 +470,59 @@ void mavlink_message_callback(const mavlink_message_t &msg)
         rc_channel_14_raw = rc_channels.chan14_raw;
         rc_channel_15_raw = rc_channels.chan15_raw;
         rc_channel_16_raw = rc_channels.chan16_raw;
+
+        rc_channel_1_normalized = normalize_rc_input(rc_channel_1_raw, 0, 65535, 800, 2200);
+        rc_channel_2_normalized = normalize_rc_input(rc_channel_2_raw, 0, 65535, 800, 2200);
+        rc_channel_3_normalized = normalize_rc_input(rc_channel_3_raw, 0, 65535, 800, 2200);
+        rc_channel_4_normalized = normalize_rc_input(rc_channel_4_raw, 0, 65535, 800, 2200);
+        rc_channel_5_normalized = normalize_rc_input(rc_channel_5_raw, 0, 65535, 800, 2200);
+        rc_channel_6_normalized = normalize_rc_input(rc_channel_6_raw, 0, 65535, 800, 2200);
+        rc_channel_7_normalized = normalize_rc_input(rc_channel_7_raw, 0, 65535, 800, 2200);
+        rc_channel_8_normalized = normalize_rc_input(rc_channel_8_raw, 0, 65535, 800, 2200);
+        rc_channel_9_normalized = normalize_rc_input(rc_channel_9_raw, 0, 65535, 800, 2200);
+        rc_channel_10_normalized = normalize_rc_input(rc_channel_10_raw, 0, 65535, 800, 2200);
+        rc_channel_11_normalized = normalize_rc_input(rc_channel_11_raw, 0, 65535, 800, 2200);
+        rc_channel_12_normalized = normalize_rc_input(rc_channel_12_raw, 0, 65535, 800, 2200);
+        rc_channel_13_normalized = normalize_rc_input(rc_channel_13_raw, 0, 65535, 800, 2200);
+        rc_channel_14_normalized = normalize_rc_input(rc_channel_14_raw, 0, 65535, 800, 2200);
+        rc_channel_15_normalized = normalize_rc_input(rc_channel_15_raw, 0, 65535, 800, 2200);
+        rc_channel_16_normalized = normalize_rc_input(rc_channel_16_raw, 0, 65535, 800, 2200);
+
+        #if defined(DEBUG)
+    std::cout << "RC Channel 1: " << rc_channel_1_raw << std::endl;
+    std::cout << "RC Channel 2: " << rc_channel_2_raw << std::endl;
+    std::cout << "RC Channel 3: " << rc_channel_3_raw << std::endl;
+    std::cout << "RC Channel 4: " << rc_channel_4_raw << std::endl;
+    std::cout << "RC Channel 5: " << rc_channel_5_raw << std::endl;
+    std::cout << "RC Channel 6: " << rc_channel_6_raw << std::endl;
+    std::cout << "RC Channel 7: " << rc_channel_7_raw << std::endl;
+    std::cout << "RC Channel 8: " << rc_channel_8_raw << std::endl;
+    std::cout << "RC Channel 9: " << rc_channel_9_raw << std::endl;
+    std::cout << "RC Channel 10: " << rc_channel_10_raw << std::endl;
+    std::cout << "RC Channel 11: " << rc_channel_11_raw << std::endl;
+    std::cout << "RC Channel 12: " << rc_channel_12_raw << std::endl;
+    std::cout << "RC Channel 13: " << rc_channel_13_raw << std::endl;
+    std::cout << "RC Channel 14: " << rc_channel_14_raw << std::endl;
+    std::cout << "RC Channel 15: " << rc_channel_15_raw << std::endl;
+    std::cout << "RC Channel 16: " << rc_channel_16_raw << std::endl;
+
+    std::cout << "RC Channel 1 normalized: " << rc_channel_1_normalized << std::endl;
+    std::cout << "RC Channel 2 normalized: " << rc_channel_2_normalized << std::endl;
+    std::cout << "RC Channel 3 normalized: " << rc_channel_3_normalized << std::endl;
+    std::cout << "RC Channel 4 normalized: " << rc_channel_4_normalized << std::endl;
+    std::cout << "RC Channel 5 normalized: " << rc_channel_5_normalized << std::endl;
+    std::cout << "RC Channel 6 normalized: " << rc_channel_6_normalized << std::endl;
+    std::cout << "RC Channel 7 normalized: " << rc_channel_7_normalized << std::endl;
+    std::cout << "RC Channel 8 normalized: " << rc_channel_8_normalized << std::endl;
+    std::cout << "RC Channel 9 normalized: " << rc_channel_9_normalized << std::endl;
+    std::cout << "RC Channel 10 normalized: " << rc_channel_10_normalized << std::endl;
+    std::cout << "RC Channel 11 normalized: " << rc_channel_11_normalized << std::endl;
+    std::cout << "RC Channel 12 normalized: " << rc_channel_12_normalized << std::endl;
+    std::cout << "RC Channel 13 normalized: " << rc_channel_13_normalized << std::endl;
+    std::cout << "RC Channel 14 normalized: " << rc_channel_14_normalized << std::endl;
+    std::cout << "RC Channel 15 normalized: " << rc_channel_15_normalized << std::endl;
+    std::cout << "RC Channel 16 normalized: " << rc_channel_16_normalized << std::endl;
+#endif
         }
     }
 }
@@ -498,6 +605,9 @@ int main(int argc, char **argv)
   // roll, pitch & yaw
   mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_ATTITUDE, mavlink_message_callback);
 
+  // rc channels
+  mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_RC_CHANNELS, mavlink_message_callback);
+
   // todo research & test with GPS signal
   // https://mavsdk.mavlink.io/v2.0/en/cpp/api_reference/structmavsdk_1_1_telemetry_1_1_health.html#mavsdktelemetryhealth-struct-reference
   telemetry->subscribe_health_all_ok([](bool health_all_ok) {
@@ -506,6 +616,15 @@ int main(int argc, char **argv)
     std::cout << "Systme all healths stus: " << health_all_ok << std::endl;
 #endif
   });
+
+  Param::Result set_parameter_result = param->set_param_float("ATC_ACCEL_P_MAX", 0.0);
+
+  if (set_parameter_result == Param::Result::Success) {
+    std::cout << "ACCEL PARAM WRITE" << std::endl;
+  }
+  else {
+    std::cout << "ACCEL PARAM NOT WRITE" << std::endl;
+  }
 
  
 //   mavlink_message_t message;
@@ -556,22 +675,23 @@ int main(int argc, char **argv)
 //     }
 // }
 
-  // altitude & gps (long, lat)
-  telemetry->subscribe_position([](Telemetry::Position position)
-                                {
-#if defined(DEBUG)
-                                  std::cout << "Altitude & GPS (long, lat)" << std::endl;
-                                  std::cout << "Altitude AMSL (above mean sea level) in metres: " << position.absolute_altitude_m
-                                            << " Altitude relative to takeoff altitude in metres: " << position.relative_altitude_m
-                                            << " Latitude: " << position.latitude_deg
-                                            << " Longitude: " << position.longitude_deg << std::endl;
-                                  std::cout << " alt asl" << gps_alt_amsl_val << " alt rel" << gps_alt_rel_val << std::endl;
-#endif
+//   send_param_map_rc(*mavlink_passthrough, "THR_MIN", 5, 100.0f, 1000.0f);
+//   // altitude & gps (long, lat)
+//   telemetry->subscribe_position([](Telemetry::Position position)
+//                                 {
+// #if defined(DEBUG)
+//                                   std::cout << "Altitude & GPS (long, lat)" << std::endl;
+//                                   std::cout << "Altitude AMSL (above mean sea level) in metres: " << position.absolute_altitude_m
+//                                             << " Altitude relative to takeoff altitude in metres: " << position.relative_altitude_m
+//                                             << " Latitude: " << position.latitude_deg
+//                                             << " Longitude: " << position.longitude_deg << std::endl;
+//                                   std::cout << " alt asl" << gps_alt_amsl_val << " alt rel" << gps_alt_rel_val << std::endl;
+// #endif
 
-                                  gps_alt_amsl_val = position.absolute_altitude_m;
-                                  gps_alt_rel_val = position.relative_altitude_m;
-                                  gps_lon_val = position.longitude_deg;
-                                  gps_lat_val = position.latitude_deg; });
+//                                   gps_alt_amsl_val = position.absolute_altitude_m;
+//                                   gps_alt_rel_val = position.relative_altitude_m;
+//                                   gps_lon_val = position.longitude_deg;
+//                                   gps_lat_val = position.latitude_deg; });
 
   // gps hdop/vdop
   telemetry->subscribe_raw_gps([](Telemetry::RawGps raw_gps)
@@ -796,8 +916,6 @@ int main(int argc, char **argv)
       break;
     }
 
-
-
     // Convert float to byte
 
     // #define GPS_MESSAGE 0x01
@@ -874,6 +992,23 @@ int main(int argc, char **argv)
     memcpy(flag_read_home_position_ready_byte, &flag_read_home_position_ready, sizeof(int));
     // home position write result
     memcpy(flag_write_home_position_ready_byte, &flag_write_home_position_ready, sizeof(int));
+
+    memcpy(rc_channel_1_raw_byte, &rc_channel_1_raw, sizeof(uint16_t));
+    memcpy(rc_channel_2_raw_byte, &rc_channel_2_raw, sizeof(uint16_t));
+    memcpy(rc_channel_3_raw_byte, &rc_channel_3_raw, sizeof(uint16_t));
+    memcpy(rc_channel_4_raw_byte, &rc_channel_4_raw, sizeof(uint16_t));
+    memcpy(rc_channel_5_raw_byte, &rc_channel_5_raw, sizeof(uint16_t));
+    memcpy(rc_channel_6_raw_byte, &rc_channel_6_raw, sizeof(uint16_t));
+    memcpy(rc_channel_7_raw_byte, &rc_channel_7_raw, sizeof(uint16_t));
+    memcpy(rc_channel_8_raw_byte, &rc_channel_8_raw, sizeof(uint16_t));
+    memcpy(rc_channel_9_raw_byte, &rc_channel_9_raw, sizeof(uint16_t));
+    memcpy(rc_channel_10_raw_byte, &rc_channel_10_raw, sizeof(uint16_t));
+    memcpy(rc_channel_11_raw_byte, &rc_channel_11_raw, sizeof(uint16_t));
+    memcpy(rc_channel_12_raw_byte, &rc_channel_12_raw, sizeof(uint16_t));
+    memcpy(rc_channel_13_raw_byte, &rc_channel_13_raw, sizeof(uint16_t));
+    memcpy(rc_channel_14_raw_byte, &rc_channel_14_raw, sizeof(uint16_t));
+    memcpy(rc_channel_15_raw_byte, &rc_channel_15_raw, sizeof(uint16_t));
+    memcpy(rc_channel_16_raw_byte, &rc_channel_16_raw, sizeof(uint16_t));
 
     // Set to buf
     packet.data[0] = 0x55; // STX  starting mark Low byte in the front
