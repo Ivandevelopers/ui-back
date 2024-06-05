@@ -358,18 +358,17 @@ uint8_t crc_check_16bites(uint8_t *pbuf, uint32_t len, uint32_t *p_result)
 void send_param_map_rc(MavlinkPassthrough& mavlink_passthrough, const std::string& param_id, int16_t rc_channel, float min_value, float max_value) {
     mavlink_message_t message;
 
-    // Створення структури для заповнення параметрів
     mavlink_param_map_rc_t param_map_rc;
     strncpy(param_map_rc.param_id, param_id.c_str(), sizeof(param_map_rc.param_id) - 1);
 
     param_map_rc.target_system = mavlink_passthrough.get_our_sysid();
     param_map_rc.target_component = mavlink_passthrough.get_our_compid();
-    param_map_rc.param_id[sizeof(param_map_rc.param_id) - 1] = '\0'; // Забезпечення null-термінатора
+    param_map_rc.param_id[sizeof(param_map_rc.param_id) - 1] = '\0'; 
 
-    param_map_rc.param_index = -1;  // Використовується param_id, а не індекс
+    param_map_rc.param_index = -1;  
     param_map_rc.parameter_rc_channel_index = rc_channel;
     param_map_rc.param_value0 = min_value;
-    param_map_rc.scale = (max_value - min_value) / 1000.0f; // Масштабування для діапазону 1000-2000
+    param_map_rc.scale = (max_value - min_value) / 1000.0f;
     param_map_rc.param_value_min = min_value;
     param_map_rc.param_value_max = max_value;
 
@@ -382,13 +381,10 @@ void send_param_map_rc(MavlinkPassthrough& mavlink_passthrough, const std::strin
 }
 
 float normalize_rc_input(int input_value, int input_min, int input_max, float output_min, float output_max) {
-    // Ensure input_value is within the bounds
     input_value = std::max(input_min, std::min(input_value, input_max));
 
-    // Normalize the input value to a 0 to 1 range
     float normalized = static_cast<float>(input_value - input_min) / (input_max - input_min);
 
-    // Scale to the output range
     return output_min + normalized * (output_max - output_min);
 }
 
@@ -452,44 +448,51 @@ void mavlink_message_callback(const mavlink_message_t &msg)
    case MAVLINK_MSG_ID_RC_CHANNELS:
   {
     mavlink_rc_channels_t rc_channels;
-    mavlink_msg_rc_channels_decode(&msg, &rc_channels);
+            mavlink_msg_rc_channels_decode(&msg, &rc_channels);
+            
+            int input_min = 0;
+            int input_max = 65535;
 
-        rc_channel_1_raw = rc_channels.chan1_raw;
-        rc_channel_2_raw = rc_channels.chan2_raw;
-        rc_channel_3_raw = rc_channels.chan3_raw;
-        rc_channel_4_raw = rc_channels.chan4_raw;
-        rc_channel_5_raw = rc_channels.chan5_raw;
-        rc_channel_6_raw = rc_channels.chan6_raw;
-        rc_channel_7_raw = rc_channels.chan7_raw;
-        rc_channel_8_raw = rc_channels.chan8_raw;
-        rc_channel_9_raw = rc_channels.chan9_raw;
-        rc_channel_10_raw = rc_channels.chan10_raw;
-        rc_channel_11_raw = rc_channels.chan11_raw;
-        rc_channel_12_raw = rc_channels.chan12_raw;
-        rc_channel_13_raw = rc_channels.chan13_raw;
-        rc_channel_14_raw = rc_channels.chan14_raw;
-        rc_channel_15_raw = rc_channels.chan15_raw;
-        rc_channel_16_raw = rc_channels.chan16_raw;
+            float output_min = 800.0f;
+            float output_max = 2200.0f;
 
-        rc_channel_1_normalized = normalize_rc_input(rc_channel_1_raw, 0, 65535, 800, 2200);
-        rc_channel_2_normalized = normalize_rc_input(rc_channel_2_raw, 0, 65535, 800, 2200);
-        rc_channel_3_normalized = normalize_rc_input(rc_channel_3_raw, 0, 65535, 800, 2200);
-        rc_channel_4_normalized = normalize_rc_input(rc_channel_4_raw, 0, 65535, 800, 2200);
-        rc_channel_5_normalized = normalize_rc_input(rc_channel_5_raw, 0, 65535, 800, 2200);
-        rc_channel_6_normalized = normalize_rc_input(rc_channel_6_raw, 0, 65535, 800, 2200);
-        rc_channel_7_normalized = normalize_rc_input(rc_channel_7_raw, 0, 65535, 800, 2200);
-        rc_channel_8_normalized = normalize_rc_input(rc_channel_8_raw, 0, 65535, 800, 2200);
-        rc_channel_9_normalized = normalize_rc_input(rc_channel_9_raw, 0, 65535, 800, 2200);
-        rc_channel_10_normalized = normalize_rc_input(rc_channel_10_raw, 0, 65535, 800, 2200);
-        rc_channel_11_normalized = normalize_rc_input(rc_channel_11_raw, 0, 65535, 800, 2200);
-        rc_channel_12_normalized = normalize_rc_input(rc_channel_12_raw, 0, 65535, 800, 2200);
-        rc_channel_13_normalized = normalize_rc_input(rc_channel_13_raw, 0, 65535, 800, 2200);
-        rc_channel_14_normalized = normalize_rc_input(rc_channel_14_raw, 0, 65535, 800, 2200);
-        rc_channel_15_normalized = normalize_rc_input(rc_channel_15_raw, 0, 65535, 800, 2200);
-        rc_channel_16_normalized = normalize_rc_input(rc_channel_16_raw, 0, 65535, 800, 2200);
+            rc_channel_1_raw = rc_channels.chan1_raw;
+            rc_channel_2_raw = rc_channels.chan2_raw;
+            rc_channel_3_raw = rc_channels.chan3_raw;
+            rc_channel_4_raw = rc_channels.chan4_raw;
+            rc_channel_5_raw = rc_channels.chan5_raw;
+            rc_channel_6_raw = rc_channels.chan6_raw;
+            rc_channel_7_raw = rc_channels.chan7_raw;
+            rc_channel_8_raw = rc_channels.chan8_raw;
+            rc_channel_9_raw = rc_channels.chan9_raw;
+            rc_channel_10_raw = rc_channels.chan10_raw;
+            rc_channel_11_raw = rc_channels.chan11_raw;
+            rc_channel_12_raw = rc_channels.chan12_raw;
+            rc_channel_13_raw = rc_channels.chan13_raw;
+            rc_channel_14_raw = rc_channels.chan14_raw;
+            rc_channel_15_raw = rc_channels.chan15_raw;
+            rc_channel_16_raw = rc_channels.chan16_raw;
 
-        #if defined(DEBUG)
-    std::cout << "RC Channel 1: " << rc_channel_1_raw << std::endl;
+            rc_channel_1_normalized = normalize_rc_input(rc_channel_1_raw, input_min, input_max, output_min, output_max);
+            rc_channel_2_normalized = normalize_rc_input(rc_channel_2_raw, input_min, input_max, output_min, output_max);
+            rc_channel_3_normalized = normalize_rc_input(rc_channel_3_raw, input_min, input_max, output_min, output_max);
+            rc_channel_4_normalized = normalize_rc_input(rc_channel_4_raw, input_min, input_max, output_min, output_max);
+            rc_channel_5_normalized = normalize_rc_input(rc_channel_5_raw, input_min, input_max, output_min, output_max);
+            rc_channel_6_normalized = normalize_rc_input(rc_channel_6_raw, input_min, input_max, output_min, output_max);
+            rc_channel_7_normalized = normalize_rc_input(rc_channel_7_raw, input_min, input_max, output_min, output_max);
+            rc_channel_8_normalized = normalize_rc_input(rc_channel_8_raw, input_min, input_max, output_min, output_max);
+            rc_channel_9_normalized = normalize_rc_input(rc_channel_9_raw, input_min, input_max, output_min, output_max);
+            rc_channel_10_normalized = normalize_rc_input(rc_channel_10_raw, input_min, input_max, output_min, output_max);
+            rc_channel_11_normalized = normalize_rc_input(rc_channel_11_raw, input_min, input_max, output_min, output_max);
+            rc_channel_12_normalized = normalize_rc_input(rc_channel_12_raw, input_min, input_max, output_min, output_max);
+            rc_channel_13_normalized = normalize_rc_input(rc_channel_13_raw, input_min, input_max, output_min, output_max);
+            rc_channel_14_normalized = normalize_rc_input(rc_channel_14_raw, input_min, input_max, output_min, output_max);
+            rc_channel_15_normalized = normalize_rc_input(rc_channel_15_raw, input_min, input_max, output_min, output_max);
+            rc_channel_16_normalized = normalize_rc_input(rc_channel_16_raw, input_min, input_max, output_min, output_max);
+            
+#if defined(DEBUG)
+
+std::cout << "RC Channel 1: " << rc_channel_1_raw << std::endl;
     std::cout << "RC Channel 2: " << rc_channel_2_raw << std::endl;
     std::cout << "RC Channel 3: " << rc_channel_3_raw << std::endl;
     std::cout << "RC Channel 4: " << rc_channel_4_raw << std::endl;
@@ -523,8 +526,11 @@ void mavlink_message_callback(const mavlink_message_t &msg)
     std::cout << "RC Channel 15 normalized: " << rc_channel_15_normalized << std::endl;
     std::cout << "RC Channel 16 normalized: " << rc_channel_16_normalized << std::endl;
 #endif
-        }
+
+            break;
+   
     }
+  }
 }
 
 struct timeval tv;
