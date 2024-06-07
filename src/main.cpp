@@ -245,23 +245,6 @@ uint16_t rc_channel_14_normalized;
 uint16_t rc_channel_15_normalized;
 uint16_t rc_channel_16_normalized;
 
-unsigned char rc_channel_1_raw_byte[sizeof(rc_channel_1_raw)];
-unsigned char rc_channel_2_raw_byte[sizeof(rc_channel_2_raw)];
-unsigned char rc_channel_3_raw_byte[sizeof(rc_channel_3_raw)];
-unsigned char rc_channel_4_raw_byte[sizeof(rc_channel_4_raw)];
-unsigned char rc_channel_5_raw_byte[sizeof(rc_channel_5_raw)];
-unsigned char rc_channel_6_raw_byte[sizeof(rc_channel_6_raw)];
-unsigned char rc_channel_7_raw_byte[sizeof(rc_channel_7_raw)];
-unsigned char rc_channel_8_raw_byte[sizeof(rc_channel_8_raw)];
-unsigned char rc_channel_9_raw_byte[sizeof(rc_channel_9_raw)];
-unsigned char rc_channel_10_raw_byte[sizeof(rc_channel_10_raw)];
-unsigned char rc_channel_11_raw_byte[sizeof(rc_channel_11_raw)];
-unsigned char rc_channel_12_raw_byte[sizeof(rc_channel_12_raw)];
-unsigned char rc_channel_13_raw_byte[sizeof(rc_channel_13_raw)];
-unsigned char rc_channel_14_raw_byte[sizeof(rc_channel_14_raw)];
-unsigned char rc_channel_15_raw_byte[sizeof(rc_channel_15_raw)];
-unsigned char rc_channel_16_raw_byte[sizeof(rc_channel_16_raw)];
-
 unsigned char rc_channel_1_normalized_byte[sizeof(rc_channel_1_normalized)];
 unsigned char rc_channel_2_normalized_byte[sizeof(rc_channel_2_normalized)];
 unsigned char rc_channel_3_normalized_byte[sizeof(rc_channel_3_normalized)];
@@ -355,6 +338,21 @@ uint8_t crc_check_16bites(uint8_t *pbuf, uint32_t len, uint32_t *p_result)
   return 2;
 }
 
+struct ChannelStats {
+    int min_value;
+    int max_value;
+};
+
+ChannelStats channel_stats[16];
+
+// void initialize_channel_stats() {
+//     for (int i = 0; i < 16; ++i) {
+//         channel_stats[i].min_value = 800;
+//         channel_stats[i].max_value = 2200;
+//     }
+// }
+
+
 void send_param_map_rc(MavlinkPassthrough& mavlink_passthrough, const std::string& param_id, int16_t rc_channel, float min_value, float max_value) {
     mavlink_message_t message;
 
@@ -444,94 +442,64 @@ void mavlink_message_callback(const mavlink_message_t &msg)
         imu_pitch_val = attitude.pitch;
         imu_yaw_val = attitude.yaw;
         }
-
-   case MAVLINK_MSG_ID_RC_CHANNELS:
-  {
+        
+    case MAVLINK_MSG_ID_RC_CHANNELS:
+{
     mavlink_rc_channels_t rc_channels;
-            mavlink_msg_rc_channels_decode(&msg, &rc_channels);
-            
-            int input_min = 0;
-            int input_max = 65535;
+    mavlink_msg_rc_channels_decode(&msg, &rc_channels);
 
-            float output_min = 800.0f;
-            float output_max = 2200.0f;
+    int input_min = 0;
+    int input_max = 65535;
 
-            rc_channel_1_raw = rc_channels.chan1_raw;
-            rc_channel_2_raw = rc_channels.chan2_raw;
-            rc_channel_3_raw = rc_channels.chan3_raw;
-            rc_channel_4_raw = rc_channels.chan4_raw;
-            rc_channel_5_raw = rc_channels.chan5_raw;
-            rc_channel_6_raw = rc_channels.chan6_raw;
-            rc_channel_7_raw = rc_channels.chan7_raw;
-            rc_channel_8_raw = rc_channels.chan8_raw;
-            rc_channel_9_raw = rc_channels.chan9_raw;
-            rc_channel_10_raw = rc_channels.chan10_raw;
-            rc_channel_11_raw = rc_channels.chan11_raw;
-            rc_channel_12_raw = rc_channels.chan12_raw;
-            rc_channel_13_raw = rc_channels.chan13_raw;
-            rc_channel_14_raw = rc_channels.chan14_raw;
-            rc_channel_15_raw = rc_channels.chan15_raw;
-            rc_channel_16_raw = rc_channels.chan16_raw;
+    float output_min = 800.0f;
+    float output_max = 2200.0f;
 
-            rc_channel_1_normalized = normalize_rc_input(rc_channel_1_raw, input_min, input_max, output_min, output_max);
-            rc_channel_2_normalized = normalize_rc_input(rc_channel_2_raw, input_min, input_max, output_min, output_max);
-            rc_channel_3_normalized = normalize_rc_input(rc_channel_3_raw, input_min, input_max, output_min, output_max);
-            rc_channel_4_normalized = normalize_rc_input(rc_channel_4_raw, input_min, input_max, output_min, output_max);
-            rc_channel_5_normalized = normalize_rc_input(rc_channel_5_raw, input_min, input_max, output_min, output_max);
-            rc_channel_6_normalized = normalize_rc_input(rc_channel_6_raw, input_min, input_max, output_min, output_max);
-            rc_channel_7_normalized = normalize_rc_input(rc_channel_7_raw, input_min, input_max, output_min, output_max);
-            rc_channel_8_normalized = normalize_rc_input(rc_channel_8_raw, input_min, input_max, output_min, output_max);
-            rc_channel_9_normalized = normalize_rc_input(rc_channel_9_raw, input_min, input_max, output_min, output_max);
-            rc_channel_10_normalized = normalize_rc_input(rc_channel_10_raw, input_min, input_max, output_min, output_max);
-            rc_channel_11_normalized = normalize_rc_input(rc_channel_11_raw, input_min, input_max, output_min, output_max);
-            rc_channel_12_normalized = normalize_rc_input(rc_channel_12_raw, input_min, input_max, output_min, output_max);
-            rc_channel_13_normalized = normalize_rc_input(rc_channel_13_raw, input_min, input_max, output_min, output_max);
-            rc_channel_14_normalized = normalize_rc_input(rc_channel_14_raw, input_min, input_max, output_min, output_max);
-            rc_channel_15_normalized = normalize_rc_input(rc_channel_15_raw, input_min, input_max, output_min, output_max);
-            rc_channel_16_normalized = normalize_rc_input(rc_channel_16_raw, input_min, input_max, output_min, output_max);
-            
+    float rc_channel_raw[16] = {
+        rc_channels.chan1_raw, rc_channels.chan2_raw, rc_channels.chan3_raw, rc_channels.chan4_raw,
+        rc_channels.chan5_raw, rc_channels.chan6_raw, rc_channels.chan7_raw, rc_channels.chan8_raw,
+        rc_channels.chan9_raw, rc_channels.chan10_raw, rc_channels.chan11_raw, rc_channels.chan12_raw,
+        rc_channels.chan13_raw, rc_channels.chan14_raw, rc_channels.chan15_raw, rc_channels.chan16_raw
+    };
+
+    float rc_channel_normalized[16];
+
+    for (int i = 0; i < 16; ++i) {
+        rc_channel_normalized[i] = normalize_rc_input(rc_channel_raw[i], input_min, input_max, output_min, output_max);
+    }
+
 #if defined(DEBUG)
-
-std::cout << "RC Channel 1: " << rc_channel_1_raw << std::endl;
-    std::cout << "RC Channel 2: " << rc_channel_2_raw << std::endl;
-    std::cout << "RC Channel 3: " << rc_channel_3_raw << std::endl;
-    std::cout << "RC Channel 4: " << rc_channel_4_raw << std::endl;
-    std::cout << "RC Channel 5: " << rc_channel_5_raw << std::endl;
-    std::cout << "RC Channel 6: " << rc_channel_6_raw << std::endl;
-    std::cout << "RC Channel 7: " << rc_channel_7_raw << std::endl;
-    std::cout << "RC Channel 8: " << rc_channel_8_raw << std::endl;
-    std::cout << "RC Channel 9: " << rc_channel_9_raw << std::endl;
-    std::cout << "RC Channel 10: " << rc_channel_10_raw << std::endl;
-    std::cout << "RC Channel 11: " << rc_channel_11_raw << std::endl;
-    std::cout << "RC Channel 12: " << rc_channel_12_raw << std::endl;
-    std::cout << "RC Channel 13: " << rc_channel_13_raw << std::endl;
-    std::cout << "RC Channel 14: " << rc_channel_14_raw << std::endl;
-    std::cout << "RC Channel 15: " << rc_channel_15_raw << std::endl;
-    std::cout << "RC Channel 16: " << rc_channel_16_raw << std::endl;
-
-    std::cout << "RC Channel 1 normalized: " << rc_channel_1_normalized << std::endl;
-    std::cout << "RC Channel 2 normalized: " << rc_channel_2_normalized << std::endl;
-    std::cout << "RC Channel 3 normalized: " << rc_channel_3_normalized << std::endl;
-    std::cout << "RC Channel 4 normalized: " << rc_channel_4_normalized << std::endl;
-    std::cout << "RC Channel 5 normalized: " << rc_channel_5_normalized << std::endl;
-    std::cout << "RC Channel 6 normalized: " << rc_channel_6_normalized << std::endl;
-    std::cout << "RC Channel 7 normalized: " << rc_channel_7_normalized << std::endl;
-    std::cout << "RC Channel 8 normalized: " << rc_channel_8_normalized << std::endl;
-    std::cout << "RC Channel 9 normalized: " << rc_channel_9_normalized << std::endl;
-    std::cout << "RC Channel 10 normalized: " << rc_channel_10_normalized << std::endl;
-    std::cout << "RC Channel 11 normalized: " << rc_channel_11_normalized << std::endl;
-    std::cout << "RC Channel 12 normalized: " << rc_channel_12_normalized << std::endl;
-    std::cout << "RC Channel 13 normalized: " << rc_channel_13_normalized << std::endl;
-    std::cout << "RC Channel 14 normalized: " << rc_channel_14_normalized << std::endl;
-    std::cout << "RC Channel 15 normalized: " << rc_channel_15_normalized << std::endl;
-    std::cout << "RC Channel 16 normalized: " << rc_channel_16_normalized << std::endl;
+    for (int i = 0; i < 16; ++i) {
+        std::cout << "RC Channel " << i + 1 << ": " << rc_channel_raw[i] << std::endl;
+        std::cout << "RC Channel " << i + 1 << " normalized: " << rc_channel_normalized[i] << std::endl;
+    }
 #endif
 
-            break;
+    for (int i = 0; i < 16; ++i) {
+        bool updated = false;
+        if (rc_channel_normalized[i] < channel_stats[i].min_value) {
+            channel_stats[i].min_value = rc_channel_normalized[i];
+            updated = true;
+        }
+        if (rc_channel_normalized[i] > channel_stats[i].max_value) {
+            channel_stats[i].max_value = rc_channel_normalized[i];
+            updated = true;
+        }
+
+#if defined(DEBUG)
+        if (updated) {
+            std::cout << "RC Channel " << i + 1 << " updated min value: " << channel_stats[i].min_value << std::endl;
+            std::cout << "RC Channel " << i + 1 << " updated max value: " << channel_stats[i].max_value << std::endl;
+        }
+        std::cout << "RC Channel " << i + 1 << " current min value: " << channel_stats[i].min_value << std::endl;
+        std::cout << "RC Channel " << i + 1 << " current max value: " << channel_stats[i].max_value << std::endl;
+#endif
+    }
+
+    break;
+}
    
     }
   }
-}
 
 struct timeval tv;
 
@@ -940,22 +908,22 @@ int main(int argc, char **argv)
     // home position write result
     memcpy(flag_write_home_position_ready_byte, &flag_write_home_position_ready, sizeof(int));
 
-    memcpy(rc_channel_1_raw_byte, &rc_channel_1_raw, sizeof(uint16_t));
-    memcpy(rc_channel_2_raw_byte, &rc_channel_2_raw, sizeof(uint16_t));
-    memcpy(rc_channel_3_raw_byte, &rc_channel_3_raw, sizeof(uint16_t));
-    memcpy(rc_channel_4_raw_byte, &rc_channel_4_raw, sizeof(uint16_t));
-    memcpy(rc_channel_5_raw_byte, &rc_channel_5_raw, sizeof(uint16_t));
-    memcpy(rc_channel_6_raw_byte, &rc_channel_6_raw, sizeof(uint16_t));
-    memcpy(rc_channel_7_raw_byte, &rc_channel_7_raw, sizeof(uint16_t));
-    memcpy(rc_channel_8_raw_byte, &rc_channel_8_raw, sizeof(uint16_t));
-    memcpy(rc_channel_9_raw_byte, &rc_channel_9_raw, sizeof(uint16_t));
-    memcpy(rc_channel_10_raw_byte, &rc_channel_10_raw, sizeof(uint16_t));
-    memcpy(rc_channel_11_raw_byte, &rc_channel_11_raw, sizeof(uint16_t));
-    memcpy(rc_channel_12_raw_byte, &rc_channel_12_raw, sizeof(uint16_t));
-    memcpy(rc_channel_13_raw_byte, &rc_channel_13_raw, sizeof(uint16_t));
-    memcpy(rc_channel_14_raw_byte, &rc_channel_14_raw, sizeof(uint16_t));
-    memcpy(rc_channel_15_raw_byte, &rc_channel_15_raw, sizeof(uint16_t));
-    memcpy(rc_channel_16_raw_byte, &rc_channel_16_raw, sizeof(uint16_t));
+    memcpy(rc_channel_1_normalized_byte, &rc_channel_1_normalized, sizeof(uint16_t));
+    memcpy(rc_channel_2_normalized_byte, &rc_channel_2_normalized, sizeof(uint16_t));
+    memcpy(rc_channel_3_normalized_byte, &rc_channel_3_normalized, sizeof(uint16_t));
+    memcpy(rc_channel_4_normalized_byte, &rc_channel_4_normalized, sizeof(uint16_t));
+    memcpy(rc_channel_5_normalized_byte, &rc_channel_5_normalized, sizeof(uint16_t));
+    memcpy(rc_channel_6_normalized_byte, &rc_channel_6_normalized, sizeof(uint16_t));
+    memcpy(rc_channel_7_normalized_byte, &rc_channel_7_normalized, sizeof(uint16_t));
+    memcpy(rc_channel_8_normalized_byte, &rc_channel_8_normalized, sizeof(uint16_t));
+    memcpy(rc_channel_9_normalized_byte, &rc_channel_9_normalized, sizeof(uint16_t));
+    memcpy(rc_channel_10_normalized_byte, &rc_channel_10_normalized, sizeof(uint16_t));
+    memcpy(rc_channel_11_normalized_byte, &rc_channel_11_normalized, sizeof(uint16_t));
+    memcpy(rc_channel_12_normalized_byte, &rc_channel_12_normalized, sizeof(uint16_t));
+    memcpy(rc_channel_13_normalized_byte, &rc_channel_13_normalized, sizeof(uint16_t));
+    memcpy(rc_channel_14_normalized_byte, &rc_channel_14_normalized, sizeof(uint16_t));
+    memcpy(rc_channel_15_normalized_byte, &rc_channel_15_normalized, sizeof(uint16_t));
+    memcpy(rc_channel_16_normalized_byte, &rc_channel_16_normalized, sizeof(uint16_t));
 
     // Set to buf
     packet.data[0] = 0x55; // STX  starting mark Low byte in the front
@@ -1126,53 +1094,53 @@ int main(int argc, char **argv)
     packet.data[128] = flag_write_home_position_ready_byte[2];
     packet.data[129] = flag_write_home_position_ready_byte[3];
 
-    packet.data[130] = rc_channel_1_raw_byte[0];
-    packet.data[131] = rc_channel_1_raw_byte[1];
+    packet.data[130] = rc_channel_1_normalized_byte[0];
+    packet.data[131] = rc_channel_1_normalized_byte[1];
     
-    packet.data[132] = rc_channel_2_raw_byte[0];
-    packet.data[133] = rc_channel_2_raw_byte[1];
+    packet.data[132] = rc_channel_2_normalized_byte[0];
+    packet.data[133] = rc_channel_2_normalized_byte[1];
 
-    packet.data[134] = rc_channel_3_raw_byte[0];
-    packet.data[135] = rc_channel_3_raw_byte[1];
+    packet.data[134] = rc_channel_3_normalized_byte[0];
+    packet.data[135] = rc_channel_3_normalized_byte[1];
 
-    packet.data[136] = rc_channel_4_raw_byte[0];
-    packet.data[137] = rc_channel_4_raw_byte[1];
+    packet.data[136] = rc_channel_4_normalized_byte[0];
+    packet.data[137] = rc_channel_4_normalized_byte[1];
 
-    packet.data[138] = rc_channel_5_raw_byte[0];
-    packet.data[139] = rc_channel_5_raw_byte[1];
+    packet.data[138] = rc_channel_5_normalized_byte[0];
+    packet.data[139] = rc_channel_5_normalized_byte[1];
 
-    packet.data[140] = rc_channel_6_raw_byte[0];
-    packet.data[141] = rc_channel_6_raw_byte[1];
+    packet.data[140] = rc_channel_6_normalized_byte[0];
+    packet.data[141] = rc_channel_6_normalized_byte[1];
 
-    packet.data[142] = rc_channel_7_raw_byte[0];
-    packet.data[143] = rc_channel_7_raw_byte[1];
+    packet.data[142] = rc_channel_7_normalized_byte[0];
+    packet.data[143] = rc_channel_7_normalized_byte[1];
 
-    packet.data[144] = rc_channel_8_raw_byte[0];
-    packet.data[145] = rc_channel_8_raw_byte[1];
+    packet.data[144] = rc_channel_8_normalized_byte[0];
+    packet.data[145] = rc_channel_8_normalized_byte[1];
 
-    packet.data[146] = rc_channel_9_raw_byte[0];
-    packet.data[147] = rc_channel_9_raw_byte[1];
+    packet.data[146] = rc_channel_9_normalized_byte[0];
+    packet.data[147] = rc_channel_9_normalized_byte[1];
 
-    packet.data[148] = rc_channel_10_raw_byte[0];
-    packet.data[149] = rc_channel_10_raw_byte[1];
+    packet.data[148] = rc_channel_10_normalized_byte[0];
+    packet.data[149] = rc_channel_10_normalized_byte[1];
 
-    packet.data[150] = rc_channel_11_raw_byte[0];
-    packet.data[151] = rc_channel_11_raw_byte[1];
+    packet.data[150] = rc_channel_11_normalized_byte[0];
+    packet.data[151] = rc_channel_11_normalized_byte[1];
 
-    packet.data[152] = rc_channel_12_raw_byte[0];
-    packet.data[153] = rc_channel_12_raw_byte[1];
+    packet.data[152] = rc_channel_12_normalized_byte[0];
+    packet.data[153] = rc_channel_12_normalized_byte[1];
 
-    packet.data[154] = rc_channel_13_raw_byte[0];
-    packet.data[155] = rc_channel_13_raw_byte[1];
+    packet.data[154] = rc_channel_13_normalized_byte[0];
+    packet.data[155] = rc_channel_13_normalized_byte[1];
 
-    packet.data[156] = rc_channel_14_raw_byte[0];
-    packet.data[157] = rc_channel_14_raw_byte[1];
+    packet.data[156] = rc_channel_14_normalized_byte[0];
+    packet.data[157] = rc_channel_14_normalized_byte[1];
 
-    packet.data[158] = rc_channel_15_raw_byte[0];
-    packet.data[159] = rc_channel_15_raw_byte[1];
+    packet.data[158] = rc_channel_15_normalized_byte[0];
+    packet.data[159] = rc_channel_15_normalized_byte[1];
 
-    packet.data[160] = rc_channel_16_raw_byte[0];
-    packet.data[161] = rc_channel_16_raw_byte[1];
+    packet.data[160] = rc_channel_16_normalized_byte[0];
+    packet.data[161] = rc_channel_16_normalized_byte[1];
 
     //////////////////////////////////////////////////////////////////////////
     packet.data[162] = 0x03;
