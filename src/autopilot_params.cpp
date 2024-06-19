@@ -6,89 +6,110 @@
 #include <mavsdk/plugins/param/param.h>
 #include <regex>
 #include <string>
+#include <unordered_set>
 
 #define DEBUG
 
-class ParamBase
-{
-public:
-  virtual ~ParamBase() {}
-  virtual std::string getName() const = 0;
-  virtual float getValue() const = 0;
-};
-
-class FloatParam : public ParamBase
-{
-public:
-  FloatParam(const mavsdk::Param::FloatParam &param) : name(param.name), value(param.value) {}
-
-  std::string getName() const override { return name; }
-  float getValue() const override { return value; }
-
-  // Add other members, if needed
-private:
-  std::string name;
-  float value;
-};
-
-// Define IntParam class implementing ParamBase
-class IntParam : public ParamBase
-{
-public:
-  IntParam(const mavsdk::Param::IntParam &param) : name(param.name), value(param.value) {}
-
-  std::string getName() const override { return name; }
-  float getValue() const override { return value; }
-
-  // Add other members, if needed
-private:
-  std::string name;
-  int value;
-};
-
-bool compareParams(const std::unique_ptr<ParamBase> &param1, const std::unique_ptr<ParamBase> &param2)
-{
-  return param1->getName() < param2->getName();
-}
-
-bool readParamsFromControllerToFile(const std::string &filename,
-                                    const mavsdk::Param::AllParams &all_params)
-{
+bool saveParamsToFile(const std::string &filename, std::vector<AutopilotParam> &params_list) {
   std::ofstream outputFile(filename);
 
-  if (!outputFile.is_open())
-  {
+  if (!outputFile.is_open()) {
     std::cerr << "Unable to open the file for writing: " << filename << std::endl;
     return 0;
   }
 
-  // Combine float_params and int_params into a single vector of ParamBase pointers
-  std::vector<std::unique_ptr<ParamBase>> all_sorted_params;
-  for (const mavsdk::Param::FloatParam &float_param : all_params.float_params)
-  {
-    all_sorted_params.push_back(std::make_unique<FloatParam>(float_param));
-  }
-  for (const mavsdk::Param::IntParam &int_param : all_params.int_params)
-  {
-    all_sorted_params.push_back(std::make_unique<IntParam>(int_param));
-  }
+  for (auto &param : params_list) {
 
-  // Sort the combined vector based on parameter names
-  std::sort(all_sorted_params.begin(), all_sorted_params.end(), compareParams);
 
-  // Write the sorted parameters to the file
-  for (const auto &param : all_sorted_params)
-  {
-    outputFile << param->getName() << "," << param->getValue() << std::endl;
-#if defined(DEBUG)
-    std::cout << param->getName() << " " << param->getValue() << std::endl;
-#endif
+    outputFile << param.get_name() << ",";
+
+    if (param.get_type() == 9 || param.get_type() == 0) {
+      outputFile << std::fixed << std::setprecision(7);
+    } else if (param.get_type() == 10) {
+      outputFile << std::fixed << std::setprecision(15);
+    } else {
+      outputFile << std::fixed << std::setprecision(0);
+    }
+    
+    outputFile << param.get_value() << std::endl;
   }
 
   outputFile.close();
-  std::cout << "Data successfully written to the file " << filename << '\n';
+
+  std::cout << "..............Data successfully written to the file " << filename << '\n';
 
   return 1;
+}
+
+bool loadParamFromFile(const std::string &filename, std::vector<AutopilotParam> &params_list) {
+  std::ifstream inputFile(filename);
+
+  if (!inputFile.is_open())
+  {
+    std::cerr << "Unable to open the file " << filename << " for reading."
+              << std::endl;
+    return false;
+  } 
+
+  std::string line;
+
+  bool is_empty = params_list.empty();
+  int count = 0;
+
+  // TODO: refactor logic
+  while (std::getline(inputFile, line))
+  {
+    std::istringstream line_stream(line);
+
+    std::string paramName;
+    std::string paramValueStr;
+
+    if (std::getline(line_stream, paramName, ',') && std::getline(line_stream, paramValueStr)) {
+      try {
+        float paramValue = std::stof(paramValueStr);
+        if (!is_empty) {
+          for (auto &param : params_list) {
+            if (param.get_name() == paramName) {
+              param.set_value(paramValue);
+              break;
+            }
+          }
+        } else {
+          params_list.push_back(AutopilotParam(paramName.c_str(), paramValue, 0, count++));
+        }
+      } catch (const std::invalid_argument& e) {
+        std::cerr << e.what() << '\n';
+        // todo return false??
+      }
+      
+    } else {
+      std::cerr << "Error reading line: " << line << std::endl;
+      return false;
+    }
+  }
+  return true;
+}
+
+void removeFirstOccurrenceOfDuplicates(std::vector<AutopilotParam>& param_list) {
+    std::unordered_map<std::string, int> last_occurrence;
+
+    for (int i = 0; i < param_list.size(); ++i) {
+        last_occurrence[param_list[i].get_name()] = i;
+    }
+
+    std::unordered_set<int> indexes_to_remove;
+
+    for (int i = 0; i < param_list.size(); ++i) {
+        if (last_occurrence[param_list[i].get_name()] != i) {
+            indexes_to_remove.insert(i);
+        }
+    }
+
+    for (int i = param_list.size() - 1; i >= 0; --i) {
+        if (indexes_to_remove.find(i) != indexes_to_remove.end()) {
+            param_list.erase(param_list.begin() + i);
+        }
+    }
 }
 
 mavsdk::Param::AllParams writeParamsFromFileToController(const std::string &filename)

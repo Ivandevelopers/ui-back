@@ -1,3 +1,6 @@
+#include "autopilot_mission.h"
+#include "autopilot_params.h"
+
 #include <future>
 #include <iostream>
 #include <thread>
@@ -18,13 +21,12 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
-
-#include "autopilot_mission.h"
-#include "autopilot_params.h"
-
-//
-#include <mavsdk/plugins/ftp/ftp.h>
 #include <mavsdk/plugins/action/action.h>
+
+#include "timer.cpp"
+
+// dev
+#include <iomanip>
 
 using namespace mavsdk;
 
@@ -34,13 +36,17 @@ using namespace mavsdk;
 
 #define CONNECTION_PORT "udp://:14552" // 14552
 
-#define PACKET_SIZE 133
+#define PACKET_SIZE 152
 
-#define PACKET_SIZE_RX 39
+#define PACKET_SIZE_RX 60
+
+#define WRITE_PARAM_INTERVAL_MS 50
+#define WRITE_PARAM_NUM_RETRIES 3
 
 // dev
 #define DIR_NAME "/data/"
 #define MISSION_WP_FILENAME "mission.plan"
+#define PARAM_FILENAME "autopilot.param"
 #include <pwd.h>
 std::string destDirPath;
 std::string getDestDirPath()
@@ -64,23 +70,40 @@ std::string getDestDirPath()
   return destDirPath;
 }
 
+/************************************** WAYPOINTS FLAGS */
 int flag_read_waypoint = 0;
 int flag_write_waypoint = 0;
-
-int flag_read_param = 0;
-int flag_write_param = 0;
 
 std::atomic<bool> flag_read_waypoint_ready = false;
 std::atomic<bool> flag_write_waypoint_ready = false;
 
-bool flag_read_param_ready = 0;
-bool flag_write_param_ready = 0;
-
 unsigned char flag_read_waypoint_ready_byte[sizeof(flag_read_waypoint_ready)];
 unsigned char flag_write_waypoint_ready_byte[sizeof(flag_write_waypoint_ready)];
 
+/************************************** PARAMS FLAGS */
+int flag_read_param = 0;
+int flag_write_param = 0;
+
+bool flag_read_param_ready = false;
+bool flag_write_param_ready = 0;
+
 unsigned char flag_read_param_ready_byte[sizeof(flag_read_param_ready)];
 unsigned char flag_write_param_ready_byte[sizeof(flag_write_param_ready)];
+
+/******************************** WRITE ONE PARAM */
+bool flag_write_one_param = false;
+
+char param_name[16] = {0};
+float param_value = 0.0;
+unsigned char param_value_byte[sizeof(param_name)];
+// TX
+bool flag_write_one_param_ready = false;
+
+u_int16_t param_failed_count = 0;
+char param_failed_name[16] = {0};
+
+unsigned char param_failed_count_byte[sizeof(param_failed_count)];
+unsigned char param_failed_name_byte[sizeof(param_failed_name)];
 
 uint32_t result = 0;
 
@@ -217,7 +240,7 @@ uint8_t flag_action_type = 0;
 #define TAKE_OFF 0x01;
 
 unsigned char flag_action_type_byte[sizeof(flag_action_type)];
-
+/******************************** TAKE OFF ALTITUDA */
 uint16_t altitude_takeoff_val = 0;
 unsigned char altitude_takeoff_byte[sizeof(altitude_takeoff_val)];
 
@@ -295,72 +318,60 @@ uint8_t crc_check_16bites(uint8_t *pbuf, uint32_t len, uint32_t *p_result)
   return 2;
 }
 
-void mavlink_message_callback(const mavlink_message_t &msg)
-{
-  switch (msg.msgid)
-  {
-  case MAVLINK_MSG_ID_VFR_HUD:
-  {
-    mavlink_vfr_hud_t vfr_hud;
-    mavlink_msg_vfr_hud_decode(&msg, &vfr_hud);
-
-#if defined(DEBUG)
-    std::cout << "Heading: " << vfr_hud.heading << std::endl;
-#endif
-
-    compass_azimuth_val = vfr_hud.heading;
-    break;
-  }
-  case MAVLINK_MSG_ID_RADIO_STATUS:
-  {
-    mavlink_radio_status_t radio_status;
-    mavlink_msg_radio_status_decode(&msg, &radio_status);
-
-#if defined(DEBUG)
-    std::cout << "RSSI: " << static_cast<unsigned int>(radio_status.rssi) << std::endl;
-    std::cout << "Remote RSSI: " << radio_status.remrssi << std::endl;
-    std::cout << "TX buffer: " << static_cast<unsigned int>(radio_status.txbuf) << std::endl;
-    std::cout << "Noise: " << static_cast<unsigned int>(radio_status.noise) << std::endl;
-    std::cout << "Remote noise: " << static_cast<unsigned int>(radio_status.remnoise) << std::endl;
-    std::cout << "RX errors: " << static_cast<unsigned int>(radio_status.rxerrors) << std::endl;
-    std::cout << "Fixed: " << static_cast<unsigned int>(radio_status.fixed) << std::endl;
-#endif
-
-    // radio_status_rssi_val = radio_status.rssi;
-    radio_status_remrssi_val = radio_status.remrssi;
-    radio_status_txbuf_val = radio_status.txbuf;
-    radio_status_noise_val = radio_status.noise;
-    radio_status_remnoise_val = radio_status.remnoise;
-    radio_status_rxerrors_val = radio_status.rxerrors;
-    radio_status_fixed_val = radio_status.fixed;
-    break;
-  }
-
-  case MAVLINK_MSG_ID_ATTITUDE:
-  {
-    mavlink_attitude_t attitude;
-    mavlink_msg_attitude_decode(&msg, &attitude);
-
-#if defined(DEBUG)
-    std::cout << "Roll attitude: " << attitude.roll << std::endl;
-    std::cout << "Pitch attitude: " << attitude.pitch << std::endl;
-    std::cout << "Yaw attitude: " << attitude.yaw << std::endl;
-#endif
-
-        imu_roll_val = attitude.roll;
-        imu_pitch_val = attitude.pitch;
-        imu_yaw_val = attitude.yaw;
-        }
-    }
-}
 
 struct timeval tv;
 
+static void mavlink_message_callback(const mavlink_message_t &msg);
+
 static bool writeHomePosition(MavlinkPassthrough &mavlink_passthrough);
 
-static void proccessAction_Msgs(uint8_t &flag_action, Action &action);
 static void do_takeoff(Action &action, int altitute);
 
+// reading params
+bool all_params_read = false;
+bool in_reading_state = false;
+// write params
+bool all_params_sent = false;
+bool all_params_write_result_ready = false;
+bool responding_param_failed = false;
+
+
+std::vector<AutopilotParam> params_list;
+std::vector<AutopilotParam> write_params_list_result;
+std::vector<AutopilotParam> write_params_fails_list;
+std::vector<int> write_params_missing_index_list;
+
+std::vector<int> read_param_missing_index_list;
+
+
+int current_index_to_write = 0;
+int write_param_retries = 0;
+
+static bool request_param_by_index(std::shared_ptr<mavsdk::MavlinkPassthrough> &mavlink_passthrough, int index);
+
+static MavlinkPassthrough::MessageHandle subscribe_param_list(std::shared_ptr<mavsdk::MavlinkPassthrough> &mavlink_passthrough, ThreadTimer &timer);
+
+static bool write_single_param(std::shared_ptr<mavsdk::MavlinkPassthrough> &mavlink_passthrough, MavlinkPassthrough::MessageHandle &write_single_param_handle, char param_name[16], float param_value);
+
+static void write_param_list(std::shared_ptr<mavsdk::MavlinkPassthrough> &mavlink_passthrough, ThreadTimer &timer);
+
+static void subscribe_write_param_list_result(std::shared_ptr<mavsdk::MavlinkPassthrough> &mavlink_passthrough, 
+                                      MavlinkPassthrough::MessageHandle &write_param_list_handle,
+                                      ThreadTimer &_params_write_result_timer
+                                      );
+
+static void write_missing_params(std::shared_ptr<mavsdk::MavlinkPassthrough> &mavlink_passthrough, ThreadTimer &_params_write_timer);
+
+static void get_params_failed(std::vector<AutopilotParam> &params_list, 
+                      std::vector<AutopilotParam> &_write_params_list_result, 
+                      std::vector<AutopilotParam> &write_params_fails_list,
+                      std::vector<int> &_write_params_missing_index_list
+                      );
+
+static void merge_failed_params(std::vector<AutopilotParam> &params_list,
+                        std::vector<AutopilotParam> &write_params_fails_list,
+                        std::vector<int> &_write_params_missing_index_list
+                        );
 
 int main(int argc, char **argv)
 {
@@ -399,9 +410,10 @@ int main(int argc, char **argv)
       mavsdk.subscribe_on_new_system([&mavsdk, &prom, &handle]() {
         auto system = mavsdk.systems().back();
 
+        std::cout << "........DEBUG SYSTEM_MSG.....NEW SYSTEM........" << std::endl;
+        connection_status_val = 1;
         if (system->has_autopilot()) {
-          std::cout << "Discovered Autopilot from Client." << std::endl;
-          connection_status_val = 1;
+          std::cout << "........AUTOPILOT ADDED........" << std::endl;
 
           mavsdk.unsubscribe_on_new_system(handle);
           prom.set_value(system);
@@ -412,7 +424,6 @@ int main(int argc, char **argv)
 
   fut.wait();
 
-  std::cout << "connection_result::" << connection_result << std::endl;
   auto system = fut.get();
 
   system->subscribe_is_connected([](bool is_connected) {
@@ -423,7 +434,6 @@ int main(int argc, char **argv)
   auto telemetry = std::make_shared<Telemetry>(system);
   auto mission_raw = std::make_shared<MissionRaw>(system);
   auto mavlink_passthrough = std::make_shared<MavlinkPassthrough>(system);
-
   //
   auto action = std::make_shared<Action>(system);
   
@@ -626,84 +636,169 @@ int main(int argc, char **argv)
     batt_charge = battery.capacity_consumed_ah;
     batt_remaining = battery.remaining_percent; });   
 
+  MavlinkPassthrough::MessageHandle read_param_list_handle;
+  MavlinkPassthrough::MessageHandle write_single_param_handle;
+  MavlinkPassthrough::MessageHandle write_param_list_handle;
+
+  ThreadTimer params_read_timer;
+  ThreadTimer params_write_timer;
+  ThreadTimer params_write_result_timer;
+
   while (1)
   {
 
-    switch (flag_read_waypoint)
-    {
-    case 1:
-    {
-      mission_raw->download_mission_async([&](MissionRaw::Result result, std::vector<MissionRaw::MissionItem> items)
-                                          {
-        if (result == MissionRaw::Result::Success) {
-            std::cout << "Mission download successful: " << std::endl;
-            readWaypointsFromControllerToFile(items, getDestDirPath() + MISSION_WP_FILENAME);
+    switch (flag_read_waypoint) {
+      case 1: {
+        mission_raw->download_mission_async([&](MissionRaw::Result result, std::vector<MissionRaw::MissionItem> items)
+                                            {
+          if (result == MissionRaw::Result::Success) {
+              std::cout << "Mission download successful: " << std::endl;
+              readWaypointsFromControllerToFile(items, getDestDirPath() + MISSION_WP_FILENAME);
 
-            flag_read_waypoint_ready.store(true, std::memory_order_release);
-        } else {
-          std::cout << "Error reading waypoints" << std::endl;
-        } });
-    }
-    }
-
-    switch (flag_write_waypoint)
-    {
-    case 1:
-    {
-      std::cout << "Writing waypoints..." << std::endl;
-
-      auto destDir = getDestDirPath() + MISSION_WP_FILENAME;
-      auto waypoints = writeWaypointsFromFileToController(destDir);
-
-      mission_raw->upload_mission_async(waypoints, [&](MissionRaw::Result result)
-                                        {
-
-          if (result != MissionRaw::Result::Success) {
-              std::cout << "Mission upload failed. Error code: " << result << std::endl;
+              flag_read_waypoint_ready.store(true, std::memory_order_release);
           } else {
-              std::cout << "Mission uploaded successfully." << std::endl;
-              
-              flag_write_waypoint_ready.store(true, std::memory_order_release);
+            std::cout << "Error reading waypoints" << std::endl;
           } });
-
-      break;
-    }
+      }
     }
 
-    // TODO: fix async operation
-    switch (flag_read_param)
-    {
-    case 1:
-    {
-      // todo
-      break;
-    }
-    default:
-      break;
+    switch (flag_write_waypoint) {
+      case 1: {
+        std::cout << "Writing waypoints..." << std::endl;
+
+        auto destDir = getDestDirPath() + MISSION_WP_FILENAME;
+        auto waypoints = writeWaypointsFromFileToController(destDir);
+
+        mission_raw->upload_mission_async(waypoints, [&](MissionRaw::Result result)
+                                          {
+
+            if (result != MissionRaw::Result::Success) {
+                std::cout << "Mission upload failed. Error code: " << result << std::endl;
+            } else {
+                std::cout << "Mission uploaded successfully." << std::endl;
+                
+                flag_write_waypoint_ready.store(true, std::memory_order_release);
+            } });
+
+        break;
+      }
     }
 
-    // TODO: add async
+    switch (flag_read_param) {
+      case 1: {
+        in_reading_state = true;
+        all_params_read = false;
+        //
+        if (params_list.size() > 0) {
+          params_list.clear();
+        }
+        mavlink_passthrough->unsubscribe_message(MAVLINK_MSG_ID_PARAM_VALUE, read_param_list_handle);
+
+        read_param_list_handle = subscribe_param_list(mavlink_passthrough, params_read_timer);
+
+        MavlinkPassthrough::Result params_request_result = mavlink_passthrough->queue_message(
+            [&](MavlinkAddress mavlink_address, uint8_t channel) {
+
+            mavlink_message_t message;
+            mavlink_msg_param_request_list_pack(
+                mavlink_passthrough->get_our_sysid(),
+                mavlink_passthrough->get_our_compid(),
+                &message,
+                mavlink_passthrough->get_target_sysid(),
+                mavlink_passthrough->get_target_compid()
+              );
+            return message; 
+          });
+
+        if (params_request_result == MavlinkPassthrough::Result::Success) {
+          flag_read_param = 0;
+        }
+        break;
+      }
+      default:
+        break;
+    }
+
     switch (flag_write_param)
     {
     case 1:
     {
-      // std::future<mavsdk::Param::AllParams> future = std::async(writeParamsFromFileToController, (getDestDirPath() + "mav.parm"));
+      std::cout << "...DEBUG FLAG...Writing params..." << std::endl;
 
-      // mavsdk::Param::AllParams parameters = future.get();
+      mavlink_passthrough->unsubscribe_message(MAVLINK_MSG_ID_PARAM_VALUE, write_param_list_handle);
 
-      // for (auto param_int : parameters.int_params)
-      // {
-      //   param->set_param_int(param_int.name, param_int.value);
-      // }
-      // for (auto param_float : parameters.float_params)
-      // {
-      //   param->set_param_float(param_float.name, param_float.value);
-      // }
+      all_params_sent = false;  
+      all_params_write_result_ready = false;    
+
+      current_index_to_write = 0;
+
+      params_list.clear();
+      write_params_list_result.clear();
+
+      write_param_retries = WRITE_PARAM_NUM_RETRIES;
+
+      subscribe_write_param_list_result(mavlink_passthrough, write_param_list_handle, params_write_result_timer);
+
+      write_param_list(mavlink_passthrough, params_write_timer);
     }
     default:
       break;
     }
 
+    if (all_params_sent && all_params_write_result_ready) {
+      std::cout << "......DEBUG...ALL PARAM SENT AND RECEIEVED" << std::endl;
+
+      get_params_failed(params_list, write_params_list_result, write_params_fails_list, write_params_missing_index_list);
+
+      all_params_sent = false;
+      all_params_write_result_ready = false;
+
+      if (write_params_missing_index_list.size() > 0 && write_param_retries > 0) {
+        subscribe_write_param_list_result(mavlink_passthrough, write_param_list_handle, params_write_result_timer);
+        write_missing_params(mavlink_passthrough, params_write_timer);
+        
+        write_param_retries--;
+      } else {
+
+        if (write_params_missing_index_list.size() > 0) {
+          merge_failed_params(params_list, write_params_fails_list, write_params_missing_index_list);
+        }
+
+        write_params_list_result.clear();
+        params_list.clear();
+        if (write_params_fails_list.size() > 0) {
+          responding_param_failed = true;
+
+          param_failed_count = write_params_fails_list.size();
+        }
+
+        flag_write_param_ready = true;
+      }
+
+    }
+
+    if (!responding_param_failed) {
+      memset(param_failed_count_byte, 0, sizeof(param_failed_count));
+      memset(param_failed_name, 0, sizeof(param_failed_name));
+    }
+
+    if (responding_param_failed && write_params_fails_list.size() > 0) {
+      std::cout << "......DEBUG...PROCCESS FAILES" << std::endl;
+
+      memcpy(param_failed_count_byte, &param_failed_count, sizeof(param_failed_count));
+
+      AutopilotParam _param = write_params_fails_list.back();
+      memcpy(param_failed_name_byte, _param.get_name().c_str(), _param.get_name().length());
+      if (_param.get_name().length() < 16) {
+        param_failed_name_byte[_param.get_name().length()] = '\0';
+      }
+
+      write_params_fails_list.pop_back();
+
+      if (write_params_fails_list.size() == 0) {
+        responding_param_failed = false;
+      }
+    }
 
 
     // Convert float to byte
@@ -757,20 +852,15 @@ int main(int argc, char **argv)
 
     bool _flag_read_waypoint_ready = flag_read_waypoint_ready.load(std::memory_order_acquire);
     memcpy(flag_read_waypoint_ready_byte, &_flag_read_waypoint_ready, sizeof(bool));
-    if (_flag_read_waypoint_ready)
-    {
-      flag_read_waypoint_ready.store(false, std::memory_order_release);
-    }
 
     bool _flag_write_waypoint_ready = flag_write_waypoint_ready.load(std::memory_order_acquire);
     memcpy(flag_write_waypoint_ready_byte, &_flag_write_waypoint_ready, sizeof(bool));
-    if (_flag_write_waypoint_ready)
-    {
-      flag_write_waypoint_ready.store(false, std::memory_order_release);
-    }
 
-    memcpy(flag_read_param_ready_byte, &flag_read_param_ready, sizeof(bool));
-    memcpy(flag_write_param_ready_byte, &flag_write_param_ready, sizeof(bool));
+    bool _flag_read_param_ready = flag_read_param_ready;
+    memcpy(flag_read_param_ready_byte, &_flag_read_param_ready, sizeof(bool));
+
+    bool _flag_write_param_ready = flag_write_param_ready;
+    memcpy(flag_write_param_ready_byte, &_flag_write_param_ready, sizeof(bool));
 
     memcpy(home_latitude_byte, &home_latitude_val, sizeof(double));
     memcpy(home_longitude_byte, &home_longitude_val, sizeof(double));
@@ -961,10 +1051,31 @@ int main(int argc, char **argv)
 
     /****************************** ARMED STATUS */
     packet.data[130] = armed_status_byte[0];
+    /****************************** WRITE ONE PARAM */
+    bool _flag_write_one_param = flag_write_one_param;
+    packet.data[131] = _flag_write_one_param ? 0x01 : 0x00;
+
+    packet.data[132] = param_failed_count_byte[0];
+    packet.data[133] = param_failed_count_byte[1];
+
+    packet.data[134] = param_failed_name_byte[0];
+    packet.data[135] = param_failed_name_byte[1];
+    packet.data[136] = param_failed_name_byte[2];
+    packet.data[137] = param_failed_name_byte[3];
+    packet.data[138] = param_failed_name_byte[4];
+    packet.data[139] = param_failed_name_byte[5];
+    packet.data[140] = param_failed_name_byte[6];
+    packet.data[141] = param_failed_name_byte[7];
+    packet.data[142] = param_failed_name_byte[8];
+    packet.data[143] = param_failed_name_byte[9];
+    packet.data[144] = param_failed_name_byte[10];
+    packet.data[145] = param_failed_name_byte[11];
+    packet.data[146] = param_failed_name_byte[12];
+    packet.data[147] = param_failed_name_byte[13];
+    packet.data[148] = param_failed_name_byte[14];
+    packet.data[149] = param_failed_name_byte[15];
 
     //////////////////////////////////////////////////////////////////////////
-    packet.data[131] = 0x03;
-    packet.data[132] = 0x07;
 
     // Calc to CRC16
     packet.crc16 = CRC16_cal(packet.data, PACKET_SIZE - 2, *crc16_tab);
@@ -983,8 +1094,29 @@ int main(int argc, char **argv)
     } else {
       if (flag_write_home_position_ready) {
         // reset flag
-        
         flag_write_home_position_ready = 0;
+      }
+
+      if (_flag_read_waypoint_ready) {
+        flag_read_waypoint_ready.store(false, std::memory_order_release);
+      }
+
+      if (_flag_write_waypoint_ready) {
+        flag_write_waypoint_ready.store(false, std::memory_order_release);
+      }
+
+      if (_flag_read_param_ready) {
+        flag_read_param_ready = false;
+        // remove params handler
+        mavlink_passthrough->unsubscribe_message(MAVLINK_MSG_ID_PARAM_VALUE, read_param_list_handle);
+      }
+
+      if (_flag_write_one_param) {
+        flag_write_one_param = 0;
+      }
+    
+      if (_flag_write_param_ready) {
+        flag_write_param_ready = false;
       }
     }
 
@@ -1044,13 +1176,37 @@ int main(int argc, char **argv)
     home_altitude_byte_rcv[2] = packetRX.data[32];
     home_altitude_byte_rcv[3] = packetRX.data[33];
 
-    /********************************* TAKE OF */
+    /********************************* TAKE OFF */
     flag_action_type_byte[0] = packetRX.data[34];
 
     altitude_takeoff_byte[0] = packetRX.data[35];
     altitude_takeoff_byte[1] = packetRX.data[36];
 
-    
+    /********************************* WRITE ONE PARAM */
+    flag_write_one_param = packetRX.data[37];
+
+    param_name[0] = packetRX.data[38];
+    param_name[1] = packetRX.data[39];
+    param_name[2] = packetRX.data[40];
+    param_name[3] = packetRX.data[41];
+    param_name[4] = packetRX.data[42];
+    param_name[5] = packetRX.data[43];
+    param_name[6] = packetRX.data[44];
+    param_name[7] = packetRX.data[45];
+    param_name[8] = packetRX.data[46];
+    param_name[9] = packetRX.data[47];
+    param_name[10] = packetRX.data[48];
+    param_name[11] = packetRX.data[49];
+    param_name[12] = packetRX.data[50];
+    param_name[13] = packetRX.data[51];
+    param_name[14] = packetRX.data[52];
+    param_name[15] = packetRX.data[53];
+
+    param_value_byte[0] = packetRX.data[54];
+    param_value_byte[1] = packetRX.data[55];
+    param_value_byte[2] = packetRX.data[56];
+    param_value_byte[3] = packetRX.data[57];
+
     // Set CRC to buf
     crc_buf[0] = packet.data[PACKET_SIZE_RX - 2];
     crc_buf[1] = packet.data[PACKET_SIZE_RX - 1];
@@ -1095,6 +1251,9 @@ int main(int argc, char **argv)
     // todo add condition
     memcpy(&altitude_takeoff_val, altitude_takeoff_byte, sizeof(float));
 
+    /*********************************************** WRITE ONE PARAM */
+    memcpy(&param_value, param_value_byte, sizeof(float));
+
     if (packetRX.data[6] == 0x67)
     {
       flag_read_waypoint = 1;
@@ -1115,6 +1274,7 @@ int main(int argc, char **argv)
 
     if (packetRX.data[8] == 0x47)
     {
+      std::cout << "......DEBUG:: READ PARAM FLAG::" << (int)packetRX.data[9] << std::endl;
       flag_read_param = 1;
     }
     else
@@ -1124,6 +1284,7 @@ int main(int argc, char **argv)
 
     if (packetRX.data[9] == 0x37)
     {
+      std::cout << "......DEBUG:: WRITE PARAM FLAG::" << (int)packetRX.data[9] << std::endl;
       flag_write_param = 1;
     }
     else
@@ -1161,12 +1322,21 @@ int main(int argc, char **argv)
       }
 
     }
+  
+    /*********************************** WRITE ONE PARAM */
+    if (flag_write_one_param) {
+      std::cout << "........ DEBUG WRITE ONE PARAM::" << (int)flag_write_one_param 
+      << " --NAME::" << param_name << " --VALUE::" << param_value
+      << std::endl;
+
+      write_single_param(mavlink_passthrough, write_single_param_handle, param_name, param_value);
+    }
   }
 
   close(cliSockDes);
 
   return 0;
-}
+};
 
 
 bool writeHomePosition(mavsdk::MavlinkPassthrough &mavlink_passthrough) {
@@ -1227,3 +1397,430 @@ void do_takeoff(Action &action, int altitute) {
       std::cout << "Takeoff success" << std::endl;
   }
 };
+
+MavlinkPassthrough::MessageHandle subscribe_param_list(std::shared_ptr<mavsdk::MavlinkPassthrough> &mavlink_passthrough, ThreadTimer &params_read_timer) {
+  MavlinkPassthrough::MessageHandle param_handle = mavlink_passthrough->subscribe_message(
+    MAVLINK_MSG_ID_PARAM_VALUE,
+    [&mavlink_passthrough, &param_handle, &params_read_timer](const mavlink_message_t &msg) {
+      mavlink_param_value_t param;
+      mavlink_msg_param_value_decode(&msg, &param);
+
+
+      // initialize params list, MOVE FROM HERE
+      if (params_list.size() == 0) {
+        params_list.resize(param.param_count);
+      }
+
+
+      if ((int)param.param_index < (int)param.param_count) {
+        params_list[(int)param.param_index] = AutopilotParam(param.param_id, param.param_value, param.param_type , param.param_index);
+        
+      } else {
+        std::cout << "**NEW MESSAGE** INDEX BIGGER THEN COUNT::" << (int)param.param_index << " --NAME::" << param.param_id <<  std::endl;
+      }
+
+      // remove received param from missing list
+      // if (read_param_missing_index_list.size() > 0 && (int)param.param_index < (int)param.param_count) {
+      //   auto it = std::find(read_param_missing_index_list.begin(), read_param_missing_index_list.end(), (int)param.param_index);
+      //   if (it != read_param_missing_index_list.end()) {
+      //     read_param_missing_index_list.erase(it);
+      //   }
+      // }
+
+      int param_timeout_ms = in_reading_state ? 1500 : 700;
+
+      if (in_reading_state) {
+        params_read_timer.setTimeout(
+          [&]() {
+            // todo use flag ready result
+            if (read_param_missing_index_list.size() == 0) {
+              for (int i = 0; i < params_list.size(); i++) {
+                if (params_list[i].get_index() < 0) {
+                  read_param_missing_index_list.push_back(i);
+                }
+              }
+            }
+
+            in_reading_state = false;
+
+            if (read_param_missing_index_list.size() > 0) {
+              request_param_by_index(mavlink_passthrough, read_param_missing_index_list.back());
+            } else {
+              if (saveParamsToFile(getDestDirPath() + PARAM_FILENAME, params_list)) {
+                flag_read_param_ready = true;
+              }
+            }
+
+            std::cout << ">>>>>>>>>>>>>TIMEOUT-RECEIVING PARAMS::SIZE MISSING:: " << read_param_missing_index_list.size() << std::endl;
+          },
+          param_timeout_ms
+        );
+
+      } else {
+        params_read_timer.setReties(5);
+        params_read_timer.clear();
+        params_read_timer.setInterval(
+          [&]() {
+            if (read_param_missing_index_list.size() == 0) {
+              for (int i = 0; i < params_list.size(); i++) {
+                if (params_list[i].get_index() < 0) {
+                  read_param_missing_index_list.push_back(i);
+                }
+              }
+            }
+
+            if (read_param_missing_index_list.size() > 0) {
+              request_param_by_index(mavlink_passthrough, read_param_missing_index_list.back());
+              read_param_missing_index_list.pop_back();
+              std::cout << ">>>>>>>>>>>>>TIME-INTERVAL-RECEIVING PARAMS::SIZE MISSING:: " << read_param_missing_index_list.size() << std::endl;
+            } else {
+              if (saveParamsToFile(getDestDirPath() + PARAM_FILENAME, params_list)) {
+                std::cout << "....... DEBUG SET FLAG READY"  << std::endl;
+                flag_read_param_ready = true;
+                all_params_read = true;
+
+                params_read_timer.clear();
+              }
+            }
+          },
+          param_timeout_ms
+        );
+      }
+    });
+
+    return param_handle;
+}
+
+bool request_param_by_index(std::shared_ptr<mavsdk::MavlinkPassthrough> &mavlink_passthrough, int index) {
+
+  MavlinkPassthrough::Result params_request_result = mavlink_passthrough->queue_message(
+    [&](MavlinkAddress mavlink_address, uint8_t channel) {
+
+    mavlink_message_t message;
+    char param_name[16] = {0};
+
+    mavlink_msg_param_request_read_pack(
+        mavlink_passthrough->get_our_sysid(),
+        mavlink_passthrough->get_our_compid(),
+        &message,
+        mavlink_passthrough->get_target_sysid(),
+        mavlink_passthrough->get_target_compid(),
+        param_name,
+        (int16_t)index
+      );
+
+    return message; 
+  });
+
+  return params_request_result == MavlinkPassthrough::Result::Success;
+}
+
+
+void subscribe_write_param_list_result(std::shared_ptr<mavsdk::MavlinkPassthrough> &mavlink_passthrough, 
+                                      MavlinkPassthrough::MessageHandle &write_param_list_handle,
+                                      ThreadTimer &_params_write_result_timer
+                                      ) {
+
+  write_param_list_handle = mavlink_passthrough->subscribe_message(
+    MAVLINK_MSG_ID_PARAM_VALUE,
+    [&mavlink_passthrough, &write_param_list_handle, &_params_write_result_timer](const mavlink_message_t &msg) {
+      mavlink_param_value_t param;
+      mavlink_msg_param_value_decode(&msg, &param);
+
+      // todo STAT_RUNTIME can be block in global interceptor
+      if (compareParamName("STAT_RUNTIME", param.param_id)) {
+        std::cout << ".......GET::STAT_RUNTIME -- RETURN " << std::endl;
+        std::cout << ".......DEBUG::ALL SEND?:: " << all_params_sent 
+        << " -- WRITE LIST RESULT:: " << write_params_list_result.size()
+        << std::endl;
+        // return;
+      } else {
+        write_params_list_result.push_back(AutopilotParam(param.param_id, param.param_value, param.param_type, param.param_index));
+      }
+
+
+      // TODO:: refactor (remove condition & test)
+      // if (all_params_sent && (write_params_list_result.size() >= params_list.size())) {
+      if (all_params_sent) {
+
+        std::cout << ".......DEBUG::MEAT CONDITION::RECEIVING WRITE PARAMS" << std::endl;
+
+        _params_write_result_timer.setTimeout(
+          [&]() {
+            all_params_write_result_ready = true;
+            mavlink_passthrough->unsubscribe_message(MAVLINK_MSG_ID_PARAM_VALUE, write_param_list_handle);
+            std::cout << ".......DEBUG::UNSUBSCRIBE WRITE PARAM LIST RESULT::" << std::endl;
+            
+          }, 5000
+        );
+      }
+    });
+}
+
+void write_missing_params(std::shared_ptr<mavsdk::MavlinkPassthrough> &mavlink_passthrough, ThreadTimer &_params_write_timer) {
+
+  _params_write_timer.setReties(write_params_missing_index_list.size());
+  _params_write_timer.setInterval(
+    [&mavlink_passthrough]() {
+
+      MavlinkPassthrough::Result set_param = mavlink_passthrough->queue_message(
+            [&mavlink_passthrough](MavlinkAddress mavlink_address, uint8_t channel) {
+            
+            auto &param = params_list.at(write_params_missing_index_list.back());
+
+            mavlink_message_t message;
+            mavlink_msg_param_set_pack(
+                mavlink_passthrough->get_our_sysid(),
+                mavlink_passthrough->get_our_compid(),
+                &message,
+                mavlink_passthrough->get_target_sysid(), 
+                mavlink_passthrough->get_target_compid(),
+                param.get_name().c_str(),
+                param.get_value(),
+                param.get_type()
+            );
+            return message; 
+        });
+
+        if (set_param != MavlinkPassthrough::Result::Success) {
+            std::cerr << "xxxxxxxxxxxxxxx FAILED SEND PARAM" << set_param << std::endl;
+        } else {
+          write_params_missing_index_list.pop_back();
+        }
+
+        if (write_params_missing_index_list.size() == 0) {
+          all_params_sent = true;
+          std::cout << "+++++++++++++++++++++++WRITE ALL PARAM DONE::" << std::endl;
+        }
+
+    }, WRITE_PARAM_INTERVAL_MS
+  );
+}
+
+
+void write_param_list(std::shared_ptr<mavsdk::MavlinkPassthrough> &mavlink_passthrough, ThreadTimer &_params_write_timer) {
+  loadParamFromFile(getDestDirPath() + "write_all.param", params_list);
+
+  if (params_list.size() == 0) {
+    // todo
+    std::cout << "____________FAIL WRITE PARAM LIST________PARAM LIST EMPTY::" << std::endl;
+    return;
+  }
+  std::cout << "...DEBUG::START UPDATE PARAMS" << std::endl;
+
+  _params_write_timer.setReties(params_list.size());
+  _params_write_timer.setInterval(
+    [&mavlink_passthrough]() {
+
+      MavlinkPassthrough::Result set_param = mavlink_passthrough->queue_message(
+            [&mavlink_passthrough](MavlinkAddress mavlink_address, uint8_t channel) {
+            
+            auto &param = params_list.at(current_index_to_write);
+
+            mavlink_message_t message;
+            mavlink_msg_param_set_pack(
+                mavlink_passthrough->get_our_sysid(),
+                mavlink_passthrough->get_our_compid(),
+                &message,
+                mavlink_passthrough->get_target_sysid(), 
+                mavlink_passthrough->get_target_compid(),
+                param.get_name().c_str(),
+                param.get_value(),
+                param.get_type()
+            );
+            return message; 
+        });
+
+        if (set_param != MavlinkPassthrough::Result::Success) {
+            std::cerr << "xxxxxxxxxxxxxxx FAILED SEND PARAM " << set_param << std::endl;
+        } else {
+          current_index_to_write++;
+        }
+
+        if (current_index_to_write >= params_list.size()) {
+          all_params_sent = true;
+          std::cout << "++++++++++++++++++++++++++++++++++++WRITE ALL PARAM DONE::" << std::endl;
+        }
+
+    }, WRITE_PARAM_INTERVAL_MS
+  );
+}
+
+bool write_single_param(std::shared_ptr<mavsdk::MavlinkPassthrough> &mavlink_passthrough, MavlinkPassthrough::MessageHandle &write_single_param_handle, char param_name[16], float param_value) {
+  loadParamFromFile(getDestDirPath() + PARAM_FILENAME, params_list);
+
+  uint8_t param_type = 0;
+  for (int i = 0; i < params_list.size(); i++) {
+    if (params_list[i].get_name() == param_name) {
+      param_type = params_list[i].get_type();
+      break;
+    }
+  }
+
+  write_single_param_handle = mavlink_passthrough->subscribe_message(
+    MAVLINK_MSG_ID_PARAM_VALUE,
+    [&mavlink_passthrough, &write_single_param_handle, param_name, param_value](const mavlink_message_t &msg) {
+      mavlink_param_value_t param;
+      mavlink_msg_param_value_decode(&msg, &param);
+
+      if (strcmp(param.param_id, param_name) == 0) {
+        mavlink_passthrough->unsubscribe_message(MAVLINK_MSG_ID_PARAM_VALUE, write_single_param_handle);
+        std::cout << "____________________PARAM UNSIBSCRIBE:ONE_P: " << std::endl;
+
+        if (param.param_value == param_value) {
+          std::cout << "____________________PARAM UPDATE SUCCESS:ONE_P:" << param.param_id << "--VALUE::" << param.param_value << std::endl;
+        } else {
+          std::cout << "____________________PARAM UPDATE FAIL:ONE_P:" << param.param_id << " --VALUE::" << param.param_value << " --SHOULD BE::" << param_value << std::endl;
+        }
+      }
+
+    });
+
+  MavlinkPassthrough::Result set_param = mavlink_passthrough->queue_message(
+        [param_name, param_value, param_type, &mavlink_passthrough](MavlinkAddress mavlink_address, uint8_t channel) {
+        
+        mavlink_message_t message;
+        mavlink_msg_param_set_pack(
+            mavlink_passthrough->get_our_sysid(),
+            mavlink_passthrough->get_our_compid(),
+            &message,
+            mavlink_passthrough->get_target_sysid(), 
+            mavlink_passthrough->get_target_compid(),
+            param_name,
+            param_value,
+            param_type
+        );
+        return message; 
+    });
+
+    if (set_param != MavlinkPassthrough::Result::Success) {
+        std::cerr << "xxxxxxxxxxxxxxx FAILED SEND PARAM " << set_param << std::endl;
+    } else {
+        std::cout << "____________________Send param new value: " << set_param << std::endl;
+    }
+
+    return set_param == MavlinkPassthrough::Result::Success;
+}
+
+void mavlink_message_callback(const mavlink_message_t &msg)
+{
+  switch (msg.msgid) {
+    case MAVLINK_MSG_ID_VFR_HUD: {
+      mavlink_vfr_hud_t vfr_hud;
+      mavlink_msg_vfr_hud_decode(&msg, &vfr_hud);
+
+#if defined(DEBUG)
+    std::cout << "Heading: " << vfr_hud.heading << std::endl;
+#endif
+
+      compass_azimuth_val = vfr_hud.heading;
+      break;
+    }
+
+    case MAVLINK_MSG_ID_RADIO_STATUS: {
+      mavlink_radio_status_t radio_status;
+      mavlink_msg_radio_status_decode(&msg, &radio_status);
+
+  #if defined(DEBUG)
+      std::cout << "RSSI: " << static_cast<unsigned int>(radio_status.rssi) << std::endl;
+      std::cout << "Remote RSSI: " << radio_status.remrssi << std::endl;
+      std::cout << "TX buffer: " << static_cast<unsigned int>(radio_status.txbuf) << std::endl;
+      std::cout << "Noise: " << static_cast<unsigned int>(radio_status.noise) << std::endl;
+      std::cout << "Remote noise: " << static_cast<unsigned int>(radio_status.remnoise) << std::endl;
+      std::cout << "RX errors: " << static_cast<unsigned int>(radio_status.rxerrors) << std::endl;
+      std::cout << "Fixed: " << static_cast<unsigned int>(radio_status.fixed) << std::endl;
+  #endif
+
+      // radio_status_rssi_val = radio_status.rssi;
+      radio_status_remrssi_val = radio_status.remrssi;
+      radio_status_txbuf_val = radio_status.txbuf;
+      radio_status_noise_val = radio_status.noise;
+      radio_status_remnoise_val = radio_status.remnoise;
+      radio_status_rxerrors_val = radio_status.rxerrors;
+      radio_status_fixed_val = radio_status.fixed;
+      break;
+    }
+
+    case MAVLINK_MSG_ID_ATTITUDE: {
+      mavlink_attitude_t attitude;
+      mavlink_msg_attitude_decode(&msg, &attitude);
+
+#if defined(DEBUG)
+    std::cout << "Roll attitude: " << attitude.roll << std::endl;
+    std::cout << "Pitch attitude: " << attitude.pitch << std::endl;
+    std::cout << "Yaw attitude: " << attitude.yaw << std::endl;
+#endif
+
+      imu_roll_val = attitude.roll;
+      imu_pitch_val = attitude.pitch;
+      imu_yaw_val = attitude.yaw;
+    }
+
+  }
+}
+
+void get_params_failed(std::vector<AutopilotParam> &params_list, 
+                      std::vector<AutopilotParam> &_write_params_list_result, 
+                      std::vector<AutopilotParam> &write_params_fails_list,
+                      std::vector<int> &_write_params_missing_index_list
+                      ) {
+  std::cout << "..........DEBUG::GET FAILED PARAMS::" << std::endl;
+
+  removeFirstOccurrenceOfDuplicates(_write_params_list_result);
+
+  // todo remove param from write_params_fails_list that in _write_params_list_result
+  if (write_params_fails_list.size() > 0) {
+    for (int i = 0; i < _write_params_list_result.size(); i++) {
+      
+      for (int j = 0; j < write_params_fails_list.size(); j++) {
+        if (_write_params_list_result[i].get_name() == write_params_fails_list[j].get_name()) {
+          write_params_fails_list.erase(write_params_fails_list.begin() + j);
+          break;
+        }
+      }
+    }
+  }
+
+  for (int i = 0; i < params_list.size(); i++) {
+
+    bool is_param_found = false;
+    for (int j = 0; j < _write_params_list_result.size(); j++) {
+      if (params_list[i].get_name() == _write_params_list_result[j].get_name()) {
+        if (params_list[i].get_value() != _write_params_list_result[j].get_value()) {
+          std::cout << ".........PARAM UPDATE FAIL:: " 
+          << params_list[i].get_name() 
+          << std::setprecision(15)
+          << " --VALUE::" << _write_params_list_result[j].get_value() 
+          << " --SHOULD BE::" << params_list[i].get_value() << std::endl;
+
+          if (write_param_retries > 0 && write_param_retries < 2) {
+            _write_params_missing_index_list.push_back(i);
+          }
+          write_params_fails_list.push_back(_write_params_list_result[j]);
+
+        }
+        is_param_found = true;
+        break;
+      }
+    }
+    if (!is_param_found) {
+      _write_params_missing_index_list.push_back(i);
+    }
+  }
+
+  removeFirstOccurrenceOfDuplicates(write_params_fails_list);
+
+  std::cout << "..........DEBUG::PARAMS GET -> FAILES COUNT:: " << write_params_fails_list.size() 
+  << "......::MISSING COUNT:: " << _write_params_missing_index_list.size() << std::endl;
+}
+
+void merge_failed_params(std::vector<AutopilotParam> &params_list,
+                        std::vector<AutopilotParam> &write_params_fails_list,
+                        std::vector<int> &_write_params_missing_index_list
+                        ) {
+  std::cout << "..........DEBUG::MERGING FAILED PARAMS" << std::endl;
+
+  for (int i = 0; i < _write_params_missing_index_list.size(); i++) {
+    write_params_fails_list.push_back(params_list[_write_params_missing_index_list[i]]);
+  }
+}

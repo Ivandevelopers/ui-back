@@ -9,6 +9,7 @@ add_executable(autopilot_control
     src/main.cpp
     src/autopilot_params.cpp
     src/autopilot_mission.cpp
+    src/timer.cpp
 )
 
 find_package(MAVSDK REQUIRED)
