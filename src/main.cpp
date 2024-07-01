@@ -12,8 +12,6 @@
 
 #include <mavsdk/plugins/ftp/ftp.h>
 
-#include <mavsdk/mavsdk.h>
-
 #include <arpa/inet.h>
 #include <fstream>
 #include <netinet/in.h>
@@ -25,10 +23,11 @@
 #include "autopilot_params.h"
 #include <cstring>
 
-// #include <functional>
-#include <mavsdk/plugins/ftp/ftp.h>
+// #include <functional>s
 
-using namespace mavsdk;
+#include "autopilot_sensors_calibration.h"
+
+// using namespace mavsdk;
 
 #define DEBUG
 
@@ -370,11 +369,13 @@ unsigned char rc_channel_16_max_byte[sizeof(rc_channel_16_normalized)];
 int flag_start_rc_calibration = 1;
 int flag_end_rc_calibration = 1;
 
+int flag_pos_accel = 1;
+int flag_accel_cal_success = 0;
+
 std::mutex flag_mutex;
 
 std::mutex channel_stats_mutex;
 std::mutex normalize_mutex;
-
 
 struct Packet
 {
@@ -457,6 +458,8 @@ struct ChannelStats {
 };
 
 ChannelStats channel_stats[16];
+
+std::array<RawImu, 6> imuData = {};
 
 void send_param_map_rc(MavlinkPassthrough& mavlink_passthrough, const std::string& param_id, int16_t rc_channel, float min_value, float max_value) {
     mavlink_message_t message;
@@ -656,23 +659,73 @@ void mavlink_message_callback(const mavlink_message_t &msg)
 //     rc_channel_15_raw = rc_channels.chan15_raw;
 //     rc_channel_16_raw = rc_channels.chan16_raw;
 //     }
-    case MAVLINK_MSG_ID_STATUSTEXT: {
-        mavlink_statustext_t statustext;
-        mavlink_msg_statustext_decode(&msg, &statustext);
-        printf("Received status message: %s\n", statustext.text);
+    // case MAVLINK_MSG_ID_STATUSTEXT: {
+    //     mavlink_statustext_t statustext;
+    //     mavlink_msg_statustext_decode(&msg, &statustext);
+    //     printf("Received status message: %s\n", statustext.text);
 
-        break;
-    }
+    //     break;
+    // }
 
     case MAVLINK_MSG_ID_RAW_IMU:
   {
     mavlink_raw_imu_t raw_imu;
     mavlink_msg_raw_imu_decode(&msg, &raw_imu);
 
+    switch (flag_pos_accel)
+    {
+    // case static_cast<int>(AccelCalibrationPosition::LEVEL):
+
+    //   if(raw_imu.xacc || raw_imu.yacc <= raw_imu.zacc) {
+
+    //     flag_accel_cal_success = 0;
+
+    //   } else {
+        
+    //     flag_accel_cal_success = 1;
+
+    //     updateImuData(imuData, AccelCalibrationPosition::LEVEL, raw_imu.xacc, raw_imu.yacc, raw_imu.zacc);
+
+    //     #if defined(DEBUG)
+
+    //     std::cout << "Accel x LEVEL: " << raw_imu.xacc << std::endl;
+    //     std::cout << "Accel y LEVEL: " << raw_imu.yacc << std::endl;
+    //     std::cout << "Accel z LEVEL: " << raw_imu.zacc << std::endl;
+
+    //     #endif
+    //   }
+    //   break;
+
+      case ACCELCAL_VEHICLE_POS_NOSEUP:
+
+        std::cout << "ACCELCAL_VEHICLE_POS_LEFT" << std::endl;
+
+        break;
+      case ACCELCAL_VEHICLE_POS_NOSEDOWN:
+
+        std::cout << "ACCELCAL_VEHICLE_POS_LEFT" << std::endl;
+
+        break;
+    default:
+      break;
+    }
+
 #if defined(DEBUG)
     std::cout << "X acceleration (raw) 1: " << raw_imu.xacc << std::endl;
     std::cout << "Y acceleration (raw) 1: " << raw_imu.yacc << std::endl;
     std::cout << "Z acceleration (raw) 1: " << raw_imu.zacc << std::endl;
+#endif
+        }
+
+ case MAVLINK_MSG_ID_SCALED_IMU:
+  {
+    mavlink_scaled_imu_t scaled_imu;
+    mavlink_msg_scaled_imu_decode(&msg, &scaled_imu);
+
+#if defined(DEBUG)
+    std::cout << "X acceleration (scaled): " << scaled_imu.xacc << std::endl;
+    std::cout << "Y acceleration (scaled): " << scaled_imu.yacc << std::endl;
+    std::cout << "Z acceleration (scaled): " << scaled_imu.zacc << std::endl;
 #endif
         }
 }
@@ -755,7 +808,6 @@ void rc_channels_message_callback(const mavlink_message_t &msg, std::shared_ptr<
         std::cout << "No calibration needed." << std::endl;
     }
 }
-
 
 struct timeval tv;
 
@@ -959,6 +1011,74 @@ int main(int argc, char **argv)
 //         std::cout << "No calibration needed." << std::endl;
 //     }
     });
+
+    send_calibration_command(mavlink_passthrough);
+
+    mavsdk::MavlinkPassthrough::CommandLong command;
+
+    command.target_sysid = mavlink_passthrough->get_target_sysid();
+    command.target_compid = mavlink_passthrough->get_target_compid();
+    command.command = MAV_CMD_ACCELCAL_VEHICLE_POS;
+    command.param1 = 6;  // Gyro calibration
+    command.param2 = 0.0;  // Magnetometer calibration
+    command.param3 = 0.0;  // Ground pressure calibration
+    command.param4 = 0.0;  // Radio calibration
+    command.param5 = 0.0;  // Accelerometer calibration
+    command.param6 = 0.0;  // Vehicle position
+    command.param7 = 0.0;  // Empty
+
+    std::cout << "ACCELCAL" << std::endl;
+
+    mavlink_passthrough->send_command_long(command);
+
+    // if(result == mavsdk::MavlinkPassthrough::Result::Success) {
+    //     std::cout << "ACCELCAL_VEHICLE_POS_LEVEL send" << std::endl;
+    // } else {
+    //     std::cout << "ACCELCAL_VEHICLE_POS_LEVEL not send " << result << std::endl;
+    // }   
+
+    send_calibration_command(mavlink_passthrough);
+
+    send_accelcal_command(mavlink_passthrough);
+
+    //mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_COMMAND_ACK, handle_mavlink_message);
+
+    mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_COMMAND_ACK, [](const mavlink_message_t &msg){
+      mavlink_command_ack_t ack;
+    mavlink_msg_command_ack_decode(&msg, &ack);
+    std::cout << "Got COMMAND_ACK: " << ack.command << ": " << ack.result << std::endl;
+
+    if (ack.command == MAV_CMD_PREFLIGHT_CALIBRATION) {
+        if (ack.result == MAV_RESULT_ACCEPTED) {
+            std::cout << "PREFLIGHT_CALIBRATION command accepted." << std::endl;
+        } else {
+            std::cerr << "PREFLIGHT_CALIBRATION command failed with result: " << ack.result << std::endl;
+        }
+    }
+    });
+
+    mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_COMMAND_LONG, [](const mavlink_message_t &msg){
+
+      std::cout << "BBB" << std::endl;
+      
+      mavlink_command_long_t commandLong;
+        mavlink_msg_command_long_decode(&msg, &commandLong);
+
+        std::cout << "AAA" << std::endl;
+
+        std::cout << commandLong.command << std::endl;
+        std::cout << commandLong.confirmation << std::endl;
+        std::cout << commandLong.param1 << std::endl;
+
+    });
+
+    mavlink_passthrough->subscribe_message(MAVLINK_MSG_ID_SENSOR_OFFSETS, handle_sensor_offsets);
+
+    send_calibration_command(mavlink_passthrough);
+
+    std::this_thread::sleep_for(std::chrono::seconds(10));  // Зачекати завершення калібрування
+    request_sensor_offsets(mavlink_passthrough);
+    
 
   // todo research & test with GPS signal
   // https://mavsdk.mavlink.io/v2.0/en/cpp/api_reference/structmavsdk_1_1_telemetry_1_1_health.html#mavsdktelemetryhealth-struct-reference
